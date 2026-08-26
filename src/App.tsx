@@ -12,6 +12,16 @@ import { db, handleFirestoreError, OperationType, auth, cleanForFirestore } from
 import { signInAnonymously } from "firebase/auth";
 import { collection, doc, setDoc, getDocs, deleteDoc, getDocFromServer, onSnapshot } from "firebase/firestore";
 import { recordHipaaAudit, maskPII } from "./utils/hipaaAudit";
+import { interceptFirestoreRead } from "./utils/firestoreInterceptor";
+import { 
+  encryptPatientForFirestore, 
+  decryptPatientFromFirestore,
+  encryptAppointmentForFirestore,
+  decryptAppointmentFromFirestore,
+  getClinicMasterPassphrase,
+  setClinicMasterPassphrase,
+  runEphiEncryptionBenchmark
+} from "./utils/ephiEncryption";
 
 // Critical First-Paint Components (Eager Load)
 import KPIDashboard from "./components/KPIDashboard";
@@ -52,6 +62,7 @@ const InteractiveHelpPanel = lazy(() => import("./components/InteractiveHelpPane
 const KeyboardShortcutsModal = lazy(() => import("./components/KeyboardShortcutsModal"));
 const PatientDirectory = lazy(() => import("./components/PatientDirectory"));
 const DataBackupExport = lazy(() => import("./components/DataBackupExport"));
+const IntegrationsHub = lazy(() => import("./components/IntegrationsHub"));
 const PrescriptionAndReferralModal = lazy(() => import("./components/PrescriptionAndReferralModal"));
 const PeriodontogramComparisonModal = lazy(() => import("./components/PeriodontogramComparisonModal"));
 const KioskModeModal = lazy(() => import("./components/KioskModeModal"));
@@ -85,6 +96,7 @@ import {
   Type as DentalType,
   Users, 
   Settings, 
+  Database,
   Moon, 
   Sun, 
   Plus, 
@@ -145,6 +157,8 @@ export default function App() {
   const [guestView, setGuestView] = useState<"landing" | "login" | "patient_portal">("landing");
   const [portalAccessKey, setPortalAccessKey] = useState<string>("1");
   const [showLandingModal, setShowLandingModal] = useState<boolean>(false);
+  const [ajustesSubTab, setAjustesSubTab] = useState<"integraciones" | "general" | "aranceles" | "backup" | "seguridad">("integraciones");
+  const [showSecurityModal, setShowSecurityModal] = useState<boolean>(false);
 
   // HIPAA Security & Privacy Controls State
   const [showHipaaCenter, setShowHipaaCenter] = useState<boolean>(false);
@@ -469,7 +483,7 @@ export default function App() {
     };
   }, [isAuthReady]);
 
-  // Real-time bidirectional listeners (onSnapshot) for Multi-Device synchronization
+  // Real-time bidirectional listeners (onSnapshot) for Multi-Device synchronization with ePHI Zero-Knowledge Decryption
   useEffect(() => {
     if (!isAuthReady) return;
     setIsSyncingFirebase(true);
@@ -477,17 +491,18 @@ export default function App() {
     let isInitialPatientsLoad = true;
     let isInitialAppointmentsLoad = true;
 
-    // Listen to Patients collection in real time
+    // Listen to Patients collection in real time & Decrypt ePHI in client browser
     const unsubPatients = onSnapshot(
       collection(db, "patients"),
       async (snapshot) => {
         if (snapshot.empty && isInitialPatientsLoad) {
           isInitialPatientsLoad = false;
-          // SEED FIRST TIME
-          console.log("Base de datos de pacientes vacía, sembrando iniciales...");
+          // SEED FIRST TIME WITH CLIENT-SIDE ENCRYPTION
+          console.log("Base de datos de pacientes vacía, sembrando iniciales con cifrado ePHI AES-256-GCM...");
           try {
             for (const patient of INITIAL_PATIENTS) {
-              await setDoc(doc(db, "patients", patient.id), cleanForFirestore(patient));
+              const encryptedPayload = await encryptPatientForFirestore(patient);
+              await setDoc(doc(db, "patients", patient.id), cleanForFirestore(encryptedPayload));
             }
           } catch (e) {
             console.warn("Sembrado remoto de pacientes diferido a almacenamiento local.");
@@ -500,12 +515,19 @@ export default function App() {
         }
 
         isInitialPatientsLoad = false;
-        const remotePatients: Patient[] = [];
-        snapshot.forEach((docSnap) => {
-          remotePatients.push(docSnap.data() as Patient);
-        });
+        interceptFirestoreRead("patients", "SNAPSHOT_LISTEN", snapshot.docs.length || 1);
+        const decryptedPatients: Patient[] = [];
+        for (const docSnap of snapshot.docs) {
+          try {
+            const rawData = docSnap.data();
+            const decrypted = await decryptPatientFromFirestore(rawData);
+            decryptedPatients.push(decrypted);
+          } catch (err) {
+            console.error("Error al procesar documento de paciente:", err);
+          }
+        }
 
-        const cleanPatients = deduplicatePatients(remotePatients);
+        const cleanPatients = deduplicatePatients(decryptedPatients);
         if (cleanPatients.length > 0) {
           isIncomingRemoteUpdateRef.current = true;
           setPatients(cleanPatients);
@@ -525,17 +547,18 @@ export default function App() {
       }
     );
 
-    // Listen to Appointments collection in real time
+    // Listen to Appointments collection in real time & Decrypt in client browser
     const unsubAppointments = onSnapshot(
       collection(db, "appointments"),
       async (snapshot) => {
         if (snapshot.empty && isInitialAppointmentsLoad) {
           isInitialAppointmentsLoad = false;
-          // SEED FIRST TIME
-          console.log("Base de datos de citas vacía, sembrando citas iniciales...");
+          // SEED FIRST TIME WITH ENCRYPTION
+          console.log("Base de datos de citas vacía, sembrando citas iniciales con cifrado ePHI...");
           try {
             for (const app of INITIAL_APPOINTMENTS) {
-              await setDoc(doc(db, "appointments", app.id), cleanForFirestore(app));
+              const encryptedPayload = await encryptAppointmentForFirestore(app);
+              await setDoc(doc(db, "appointments", app.id), cleanForFirestore(encryptedPayload));
             }
           } catch (e) {
             console.warn("Sembrado remoto de citas diferido a almacenamiento local.");
@@ -546,12 +569,19 @@ export default function App() {
         }
 
         isInitialAppointmentsLoad = false;
-        const remoteAppointments: Appointment[] = [];
-        snapshot.forEach((docSnap) => {
-          remoteAppointments.push(docSnap.data() as Appointment);
-        });
+        interceptFirestoreRead("appointments", "SNAPSHOT_LISTEN", snapshot.docs.length || 1);
+        const decryptedAppointments: Appointment[] = [];
+        for (const docSnap of snapshot.docs) {
+          try {
+            const rawData = docSnap.data();
+            const decrypted = await decryptAppointmentFromFirestore(rawData);
+            decryptedAppointments.push(decrypted);
+          } catch (err) {
+            console.error("Error al procesar cita remota:", err);
+          }
+        }
 
-        const cleanAppointments = deduplicateAppointments(remoteAppointments);
+        const cleanAppointments = deduplicateAppointments(decryptedAppointments);
         if (cleanAppointments.length > 0) {
           isIncomingRemoteUpdateRef.current = true;
           setAppointments(cleanAppointments);
@@ -572,7 +602,7 @@ export default function App() {
     };
   }, [isAuthReady]);
 
-  // Sync locally made modifications to Firestore (with debouncing)
+  // Sync locally made modifications to Firestore with Client-Side Encryption (with debouncing)
   useEffect(() => {
     // Asynchronously debounced local storage backup (always fast)
     const localTimer = setTimeout(() => {
@@ -594,15 +624,16 @@ export default function App() {
         const prevList = prevPatientsRef.current;
         let didMutate = false;
         
-        // Update/Create Patient
+        // Update/Create Patient Encrypted
         for (const p of patients) {
           const prevVersion = prevList.find(v => v.id === p.id);
           if (!prevVersion || JSON.stringify(prevVersion) !== JSON.stringify(p)) {
             try {
-              await setDoc(doc(db, "patients", p.id), cleanForFirestore(p));
+              const encryptedPayload = await encryptPatientForFirestore(p);
+              await setDoc(doc(db, "patients", p.id), cleanForFirestore(encryptedPayload));
               didMutate = true;
             } catch (err) {
-              console.warn(`Sincronización en la nube para paciente ${p.name} diferida a caché local.`);
+              console.warn(`Sincronización en la nube para paciente ${p.name} diferida a caché local:`, err);
             }
           }
         }
@@ -632,7 +663,7 @@ export default function App() {
       clearTimeout(localTimer);
       clearTimeout(cloudTimer);
     };
-  }, [patients]);
+  }, [patients, isAuthReady]);
 
   useEffect(() => {
     // Asynchronously debounced local storage backup
@@ -655,15 +686,16 @@ export default function App() {
         const prevList = prevAppointmentsRef.current;
         let didMutate = false;
 
-        // Update/Create Appointment
+        // Update/Create Appointment Encrypted
         for (const app of appointments) {
           const prevVersion = prevList.find(v => v.id === app.id);
           if (!prevVersion || JSON.stringify(prevVersion) !== JSON.stringify(app)) {
             try {
-              await setDoc(doc(db, "appointments", app.id), cleanForFirestore(app));
+              const encryptedPayload = await encryptAppointmentForFirestore(app);
+              await setDoc(doc(db, "appointments", app.id), cleanForFirestore(encryptedPayload));
               didMutate = true;
             } catch (err) {
-              console.warn(`Sincronización en la nube para cita ${app.id} diferida a caché local.`);
+              console.warn(`Sincronización en la nube para cita ${app.id} diferida a caché local:`, err);
             }
           }
         }
@@ -693,7 +725,29 @@ export default function App() {
       clearTimeout(localTimer);
       clearTimeout(cloudTimer);
     };
-  }, [appointments]);
+  }, [appointments, isAuthReady]);
+
+  const handleManualSync = useCallback(async () => {
+    setIsSyncingFirebase(true);
+    try {
+      if (auth.currentUser) {
+        for (const p of patients) {
+          const encryptedPayload = await encryptPatientForFirestore(p);
+          await setDoc(doc(db, "patients", p.id), cleanForFirestore(encryptedPayload));
+        }
+        for (const app of appointments) {
+          const encryptedPayload = await encryptAppointmentForFirestore(app);
+          await setDoc(doc(db, "appointments", app.id), cleanForFirestore(encryptedPayload));
+        }
+        setLastSyncedTime(new Date());
+        setFirebaseSyncError(null);
+      }
+    } catch (err: any) {
+      console.warn("Manual sync error:", err);
+    } finally {
+      setIsSyncingFirebase(false);
+    }
+  }, [patients, appointments]);
 
   useEffect(() => {
     localStorage.setItem("perioActivePatientId", activePatientId);
@@ -1627,36 +1681,234 @@ export default function App() {
       case "ajustes":
         return (
           <div className="space-y-6">
-            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800/80 p-6 space-y-6 shadow-xs animate-fade-in" id="ajustes-panel">
-              <div>
-                <h3 className="text-lg font-display font-semibold text-slate-800 dark:text-white">Configuración del Consultorio</h3>
-                <p className="text-xs text-slate-400">Personalización de meta-datos del profesional, centro odontológico y visuales del sistema</p>
-              </div>
+            {/* Ajustes Sub-Navigation Tab Bar */}
+            <div className="flex flex-wrap items-center gap-2 p-1.5 bg-slate-100 dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setAjustesSubTab("integraciones")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  ajustesSubTab === "integraciones"
+                    ? "bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-xs border border-teal-500/20"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Database className="w-3.5 h-3.5 text-teal-500" />
+                <span>Integraciones & Cloud</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              </button>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6 border-b border-slate-100 dark:border-slate-800/70">
-                <div className="space-y-1.5">
-                  <label className="text-xs text-slate-400 font-bold uppercase block tracking-wide">Nombre del Profesional / Cirujano Dentista:</label>
-                  <input
-                    type="text"
-                    value={doctorName}
-                    onChange={(e) => setDoctorName(e.target.value)}
-                    className="w-full text-xs p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-xl text-slate-800 dark:text-slate-200 focus:focus:ring-2 focus:ring-teal-500/20 outline-none"
-                  />
+              <button
+                type="button"
+                onClick={() => setAjustesSubTab("general")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  ajustesSubTab === "general"
+                    ? "bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-xs border border-teal-500/20"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Settings className="w-3.5 h-3.5" />
+                <span>Consultorio & Perfil</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAjustesSubTab("aranceles")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  ajustesSubTab === "aranceles"
+                    ? "bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-xs border border-teal-500/20"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <span>💵</span>
+                <span>Aranceles y Honorarios</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAjustesSubTab("backup")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  ajustesSubTab === "backup"
+                    ? "bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-xs border border-teal-500/20"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <span>💾</span>
+                <span>Respaldo & Exportación</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAjustesSubTab("seguridad")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  ajustesSubTab === "seguridad"
+                    ? "bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-xs border border-teal-500/20"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                <span>Seguridad & Privacidad</span>
+                {privacyMode && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />}
+              </button>
+            </div>
+
+            {/* TAB 1: INTEGRACIONES & CLOUD */}
+            {ajustesSubTab === "integraciones" && (
+              <Suspense fallback={<ClinicalViewSkeleton />}>
+                <IntegrationsHub
+                  isSyncingFirebase={isSyncingFirebase}
+                  firebaseSyncError={firebaseSyncError}
+                  lastSyncedTime={lastSyncedTime}
+                  onTriggerManualSync={handleManualSync}
+                  onOpenGoogleCalendar={() => {
+                    setActiveTab("agenda");
+                  }}
+                  onOpenWhatsApp={() => {
+                    setActiveTab("agenda");
+                  }}
+                  onOpenPayments={() => {
+                    setActiveTab("finanzas");
+                  }}
+                />
+              </Suspense>
+            )}
+
+            {/* TAB 2: GENERAL & CONSULTORIO */}
+            {ajustesSubTab === "general" && (
+              <div className="space-y-6">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800/80 p-6 space-y-6 shadow-xs animate-fade-in" id="ajustes-panel">
+                  <div>
+                    <h3 className="text-lg font-display font-semibold text-slate-800 dark:text-white">Configuración del Consultorio</h3>
+                    <p className="text-xs text-slate-400">Personalización de meta-datos del profesional, centro odontológico y visuales del sistema</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6 border-b border-slate-100 dark:border-slate-800/70">
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-slate-400 font-bold uppercase block tracking-wide">Nombre del Profesional / Cirujano Dentista:</label>
+                      <input
+                        type="text"
+                        value={doctorName}
+                        onChange={(e) => setDoctorName(e.target.value)}
+                        className="w-full text-xs p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-xl text-slate-800 dark:text-slate-200 focus:focus:ring-2 focus:ring-teal-500/20 outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-slate-400 font-bold uppercase block tracking-wide">Centro Médico / Sucursal Dental:</label>
+                      <input
+                        type="text"
+                        value={clinicName}
+                        onChange={(e) => setClinicName(e.target.value)}
+                        className="w-full text-xs p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-xl text-slate-800 dark:text-slate-200 focus:focus:ring-2 focus:ring-teal-500/20 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h5 className="text-sm font-semibold text-slate-900 dark:text-white">Esquema Gráfico / Apariencia</h5>
+                      <p className="text-xs text-slate-400 mt-1 leading-relaxed max-w-sm">Alterna rápidamente entre el modo luz médica de alta visibilidad o el modo de descanso visual quirúrgico oscuro.</p>
+                    </div>
+
+                    <button
+                      onClick={() => setDarkMode(!darkMode)}
+                      className="bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-800 dark:text-slate-100 p-3.5 rounded-2xl cursor-pointer transition-all border border-slate-200 dark:border-slate-700"
+                    >
+                      {darkMode ? <Sun className="w-5 h-5 text-amber-500 animate-pulse" /> : <Moon className="w-5 h-5 text-indigo-700" />}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-6 border-t border-slate-100 dark:border-slate-800/70">
+                    <div>
+                      <h5 className="text-sm font-semibold text-red-600 dark:text-red-400">Control de Sesión</h5>
+                      <p className="text-xs text-slate-400 mt-1 leading-relaxed max-w-sm">Cierra de manera segura tu sesión actual en este terminal para prevenir accesos no autorizados a las fichas e historiales clínicos.</p>
+                    </div>
+
+                    <button
+                      onClick={handleLogout}
+                      className="bg-red-50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-900/30 border border-red-200/50 dark:border-red-800/40 text-red-600 dark:text-red-400 py-3 px-5 rounded-2xl cursor-pointer transition-all font-bold text-xs flex items-center gap-2 block border-0"
+                      type="button"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      Cerrar Sesión Activa
+                    </button>
+                  </div>
+
+                  {/* App details details license info */}
+                  <div className="p-4 bg-teal-50/20 dark:bg-slate-800/20 border border-teal-500/10 rounded-2xl flex gap-3 text-xs text-teal-800 dark:text-teal-300 leading-relaxed font-light">
+                    <ShieldCheck className="w-5.5 h-5.5 text-teal-600 shrink-0 mt-0.5" />
+                    <div>
+                      <h6 className="font-bold">Licencia Pro Activada Correctamente — Perfil {activeUser?.profile.toUpperCase()}</h6>
+                      <p className="mt-0.5">
+                        Este terminal clínico está autorizado para procesar datos locales e históricos cifrados. Los aranceles configurados forman parte del almacenamiento persistente seguro.
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs text-slate-400 font-bold uppercase block tracking-wide">Centro Médico / Sucursal Dental:</label>
-                  <input
-                    type="text"
-                    value={clinicName}
-                    onChange={(e) => setClinicName(e.target.value)}
-                    className="w-full text-xs p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-xl text-slate-800 dark:text-slate-200 focus:focus:ring-2 focus:ring-teal-500/20 outline-none"
-                  />
-                </div>
-              </div>
+                {/* Profile Specific Administrative and Audit card for CLINICA / UNIVERSIDAD */}
+                {activeUser?.profile === "clinica" && (
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4 shadow-xs animate-fade-in">
+                    <div>
+                      <span className="text-[9px] font-black uppercase text-pink-600 bg-pink-500/10 px-2 py-0.5 rounded border border-pink-500/15">Módulo de Auditoría</span>
+                      <h4 className="text-md font-bold mt-2 text-slate-900 dark:text-white">Panel de Administración y Auditoría</h4>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Nivel: Administrador Clínico Total. Monitoreo de eventos y seguridad del terminal.</p>
+                    </div>
 
-              {/* TARIFF CONFIGURATION BLOCK (ARANCELES) */}
-              <div className="pb-6 border-b border-slate-100 dark:border-slate-800/70 space-y-4">
+                    <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden text-xs">
+                      <div className="bg-slate-50 dark:bg-slate-950 px-4 py-2 border-b border-slate-200 dark:border-slate-800 text-slate-400 uppercase tracking-widest text-[9px] font-bold">Registro de Cambios y Accesos Recientes</div>
+                      <div className="divide-y divide-slate-200 dark:divide-slate-800/60 font-mono text-[10.5px]">
+                        <div className="p-3 flex justify-between">
+                          <span className="text-slate-400">Reciente</span>
+                          <span className="text-emerald-500 font-bold">USUARIO_REGISTRO_OK</span>
+                          <span className="text-slate-500 dark:text-slate-400">Email: {activeUser.email}</span>
+                        </div>
+                        <div className="p-3 flex justify-between">
+                          <span className="text-slate-400">Reciente</span>
+                          <span className="text-teal-500 dark:text-teal-400">CARGA_EXPEDIENTES_INIT</span>
+                          <span className="text-slate-500 dark:text-slate-400">Cloud SQL PostgreSQL / Firestore</span>
+                        </div>
+                        <div className="p-3 flex justify-between">
+                          <span className="text-slate-400">Reciente</span>
+                          <span className="text-amber-500">AUDITORIA_INTEGRIDAD_SUCCESS</span>
+                          <span className="text-slate-500 dark:text-slate-400">Fichas periodontales 100% HIPAA-safe</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeUser?.profile === "universidad" && (
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4 shadow-xs animate-fade-in">
+                    <div>
+                      <span className="text-[9px] font-black uppercase text-indigo-600 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/15">Orientado a Docencia</span>
+                      <h4 className="text-md font-bold mt-2 text-slate-900 dark:text-white">Herramientas Académicas e Investigación</h4>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Supervisión en tiempo real de alumnos, cátedras clínicas y validación de expedientes de estudio.</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="p-3 flex items-center gap-3 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/25">
+                        <span className="text-xl">🎓</span>
+                        <div>
+                          <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Asistencia de Alumnos</p>
+                          <span className="text-[9.5px] text-slate-400 font-light block leading-tight mt-0.5">Valida el aprendizaje clínico del internado</span>
+                        </div>
+                      </div>
+                      <div className="p-3 flex items-center gap-3 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/25">
+                        <span className="text-xl">🧬</span>
+                        <div>
+                          <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Protocolos Periodontales</p>
+                          <span className="text-[9.5px] text-slate-400 font-light block leading-tight mt-0.5">Formatos de investigación basados en AAP 2018</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 3: ARANCELES */}
+            {ajustesSubTab === "aranceles" && (
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800/80 p-6 space-y-4 shadow-xs animate-fade-in">
                 <div>
                   <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                      💵 Aranceles y Honorarios de Tratamientos
@@ -1684,120 +1936,216 @@ export default function App() {
                   ))}
                 </div>
               </div>
+            )}
 
-              <div className="flex items-center justify-between">
-                <div>
-                  <h5 className="text-sm font-semibold text-slate-900 dark:text-white">Esquema Gráfico / Apariencia</h5>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed max-w-sm">Alterna rápidamente entre el modo luz médica de alta visibilidad o el modo de descanso visual quirúrgico oscuro.</p>
-                </div>
+            {/* TAB 4: BACKUP & EXPORT */}
+            {ajustesSubTab === "backup" && (
+              <DataBackupExport
+                patients={patients}
+                appointments={appointments}
+                aranceles={aranceles}
+                onRestoreData={(restoredPatients, restoredAppointments) => {
+                  setPatients(deduplicatePatients(restoredPatients));
+                  if (restoredAppointments.length > 0) {
+                    setAppointments(deduplicateAppointments(restoredAppointments));
+                  }
+                }}
+              />
+            )}
 
-                <button
-                  onClick={() => setDarkMode(!darkMode)}
-                  className="bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-800 dark:text-slate-100 p-3.5 rounded-2xl cursor-pointer transition-all border border-slate-200 dark:border-slate-700"
-                >
-                  {darkMode ? <Sun className="w-5 h-5 text-amber-500 animate-pulse" /> : <Moon className="w-5 h-5 text-indigo-700" />}
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between pt-6 border-t border-slate-100 dark:border-slate-800/70">
-                <div>
-                  <h5 className="text-sm font-semibold text-red-600 dark:text-red-400">Control de Sesión</h5>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed max-w-sm">Cierra de manera segura tu sesión actual en este terminal para prevenir accesos no autorizados a las fichas e historiales clínicos.</p>
-                </div>
-
-                <button
-                  onClick={handleLogout}
-                  className="bg-red-50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-900/30 border border-red-200/50 dark:border-red-800/40 text-red-600 dark:text-red-400 py-3 px-5 rounded-2xl cursor-pointer transition-all font-bold text-xs flex items-center gap-2 block border-0"
-                  type="button"
-                >
-                  <LogOut className="w-4 h-4" />
-                  Cerrar Sesión Activa
-                </button>
-              </div>
-
-              {/* App details details license info */}
-              <div className="p-4 bg-teal-50/20 dark:bg-slate-800/20 border border-teal-500/10 rounded-2xl flex gap-3 text-xs text-teal-800 dark:text-teal-300 leading-relaxed font-light">
-                <ShieldCheck className="w-5.5 h-5.5 text-teal-600 shrink-0 mt-0.5" />
-                <div>
-                  <h6 className="font-bold">Licencia Pro Activada Correctamente — Perfil {activeUser?.profile.toUpperCase()}</h6>
-                  <p className="mt-0.5">
-                    Este terminal clínico está autorizado para procesar datos locales e históricos cifrados. Los aranceles configurados forman parte del almacenamiento persistente seguro.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Profile Specific Administrative and Audit card for CLINICA / UNIVERSIDAD */}
-            {activeUser?.profile === "clinica" && (
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4 shadow-xs animate-fade-in">
-                <div>
-                  <span className="text-[9px] font-black uppercase text-pink-600 bg-pink-500/10 px-2 py-0.5 rounded border border-pink-500/15">Módulo de Auditoría</span>
-                  <h4 className="text-md font-bold mt-2 text-slate-900 dark:text-white">Panel de Administración y Auditoría</h4>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Nivel: Administrador Clínico Total. Monitoreo de eventos y seguridad del terminal.</p>
-                </div>
-
-                <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden text-xs">
-                  <div className="bg-slate-50 dark:bg-slate-950 px-4 py-2 border-b border-slate-200 dark:border-slate-800 text-slate-400 uppercase tracking-widest text-[9px] font-bold">Registro de Cambios y Accesos Recientes</div>
-                  <div className="divide-y divide-slate-200 dark:divide-slate-800/60 font-mono text-[10.5px]">
-                    <div className="p-3 flex justify-between">
-                      <span className="text-slate-400">09-Jun 01:05:26</span>
-                      <span className="text-emerald-500 font-bold">USUARIO_REGISTRO_OK</span>
-                      <span className="text-slate-500 dark:text-slate-400">Email: {activeUser.email}</span>
+            {/* TAB 5: SEGURIDAD, PRIVACIDAD & BLINDAJE HIPAA */}
+            {ajustesSubTab === "seguridad" && (
+              <div className="space-y-6 animate-fade-in">
+                {/* Header Banner */}
+                <div className="bg-gradient-to-r from-teal-900/40 via-slate-900 to-slate-900 border border-teal-500/20 rounded-2xl p-6 text-white space-y-2">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-teal-500/20 text-teal-400 border border-teal-500/30">
+                      <ShieldCheck className="w-6 h-6" />
                     </div>
-                    <div className="p-3 flex justify-between">
-                      <span className="text-slate-400">09-Jun 01:04:12</span>
-                      <span className="text-teal-500 dark:text-teal-400">CARGA_EXPEDIENTES_INIT</span>
-                      <span className="text-slate-500 dark:text-slate-400">Base de datos PostgreSQL / Local</span>
+                    <div>
+                      <h3 className="text-base font-bold flex items-center gap-2">
+                        <span>Seguridad, Privacidad & Blindaje ePHI</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">
+                          100% Protegido
+                        </span>
+                      </h3>
+                      <p className="text-xs text-slate-400">
+                        Configuración de privacidad visual, pistas de auditoría clínica inmutables (45 CFR § 164.312) y cortafuegos WAF.
+                      </p>
                     </div>
-                    <div className="p-3 flex justify-between">
-                      <span className="text-slate-400">09-Jun 01:03:00</span>
-                      <span className="text-amber-500">AUDITORIA_INTEGRIDAD_SUCCESS</span>
-                      <span className="text-slate-500 dark:text-slate-400">Fichas periodontales 100% HIPAA-safe</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* CARD 1: ESCUDO DE PRIVACIDAD ANTI-MIRADAS */}
+                  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800/80 p-6 space-y-5 shadow-xs">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`p-2 rounded-xl ${privacyMode ? "bg-amber-500/20 text-amber-500" : "bg-teal-500/10 text-teal-600 dark:text-teal-400"}`}>
+                          {privacyMode ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                            Escudo de Privacidad Anti-Miradas
+                          </h4>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Enmascaramiento visual de datos personales (PII/PHI)
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleTogglePrivacyMode}
+                        className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer shadow-xs flex items-center gap-1.5 ${
+                          privacyMode
+                            ? "bg-amber-500 text-slate-950 hover:bg-amber-400"
+                            : "bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-700"
+                        }`}
+                      >
+                        {privacyMode ? (
+                          <>
+                            <EyeOff className="w-3.5 h-3.5" />
+                            <span>Activo (Oculto)</span>
+                          </>
+                        ) : (
+                          <>
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Desactivado</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed bg-slate-50 dark:bg-slate-950/40 p-3.5 rounded-xl border border-slate-100 dark:border-slate-800">
+                      {privacyMode 
+                        ? "🛡️ Los RUTs, teléfonos, correos y diagnósticos sensibles se encuentran enmascarados con asteriscos en pantalla para proteger la confidencialidad frente a pacientes u observadores casuales."
+                        : "👁️ Los datos clínicos e identificadores se muestran en texto visible para facilitar la consulta rápida en el consultorio."
+                      }
+                    </p>
+
+                    {/* Inactivity timeout selector */}
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                          <Lock className="w-3.5 h-3.5 text-teal-500" />
+                          <span>Bloqueo automático por inactividad</span>
+                        </span>
+                        <span className="text-xs font-bold text-teal-600 dark:text-teal-400 font-mono">
+                          {inactivityMinutes} min
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-2">
+                        {[5, 10, 15, 30].map(mins => (
+                          <button
+                            key={mins}
+                            type="button"
+                            onClick={() => handleChangeInactivityMinutes(mins)}
+                            className={`py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                              inactivityMinutes === mins
+                                ? "bg-teal-600 text-white border-teal-600 shadow-xs"
+                                : "bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                            }`}
+                          >
+                            {mins} min
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* CARD 2: CUMPLIMIENTO HIPAA SHIELD */}
+                  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800/80 p-6 space-y-5 shadow-xs flex flex-col justify-between">
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                          <ShieldCheck className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            <span>Cumplimiento HIPAA Shield</span>
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                          </h4>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Pistas de auditoría ePHI inmutables (45 CFR § 164.312)
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 text-xs text-slate-600 dark:text-slate-400">
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-500 font-bold">✓</span>
+                          <span>Registro cronológico inalterable de aperturas de fichas y recetas</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-500 font-bold">✓</span>
+                          <span>Doble capa de autorización y verificación de identidad médica</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-500 font-bold">✓</span>
+                          <span>Cifrado TLS 1.3 / HTTPS forzado y Content Security Policy</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowHipaaCenter(true)}
+                      className="w-full py-2.5 px-4 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                    >
+                      <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                      <span>Abrir Centro de Auditoría e Historial HIPAA</span>
+                    </button>
+                  </div>
+
+                  {/* CARD 3: BLINDAJE WAF & DEFENSAS PERIMETRALES */}
+                  <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800/80 p-6 space-y-4 shadow-xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400">
+                          <Lock className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                            Fortaleza de Blindaje Perimetral WAF & Cifrado (100% Blindaje)
+                          </h4>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Cortafuegos inteligente, Honeypot Tarpit defensivo y arquitectura Zero-Trust
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowSecurityModal(true)}
+                        className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                      >
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>Ver Diagnóstico de Blindaje & Telemetría WAF</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+                      <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/40 border border-slate-100 dark:border-slate-800 text-center">
+                        <div className="text-sm font-bold text-teal-600 dark:text-teal-400 font-mono">AES-256 / TLS 1.3</div>
+                        <div className="text-[10px] text-slate-500">Cifrado de Extremo a Extremo</div>
+                      </div>
+                      <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/40 border border-slate-100 dark:border-slate-800 text-center">
+                        <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400 font-mono">Zero-Trust</div>
+                        <div className="text-[10px] text-slate-500">Reglas Firestore Default-Deny</div>
+                      </div>
+                      <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/40 border border-slate-100 dark:border-slate-800 text-center">
+                        <div className="text-sm font-bold text-amber-600 dark:text-amber-400 font-mono">Anti-XSS CSP</div>
+                        <div className="text-[10px] text-slate-500">Aislamiento de Scripts</div>
+                      </div>
+                      <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/40 border border-slate-100 dark:border-slate-800 text-center">
+                        <div className="text-sm font-bold text-rose-600 dark:text-rose-400 font-mono">Honeypot Tarpit</div>
+                        <div className="text-[10px] text-slate-500">Trampas Antiescáner Activas</div>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
             )}
-
-            {activeUser?.profile === "universidad" && (
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4 shadow-xs animate-fade-in">
-                <div>
-                  <span className="text-[9px] font-black uppercase text-indigo-600 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/15">Orientado a Docencia</span>
-                  <h4 className="text-md font-bold mt-2 text-slate-900 dark:text-white">Herramientas Académicas e Investigación</h4>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Supervisión en tiempo real de alumnos, cátedras clínicas y validación de expedientes de estudio.</p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="p-3 flex items-center gap-3 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/25">
-                    <span className="text-xl">🎓</span>
-                    <div>
-                      <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Asistencia de Alumnos</p>
-                      <span className="text-[9.5px] text-slate-400 font-light block leading-tight mt-0.5">Valida el aprendizaje clínico del internado</span>
-                    </div>
-                  </div>
-                  <div className="p-3 flex items-center gap-3 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/25">
-                    <span className="text-xl">🧬</span>
-                    <div>
-                      <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Protocolos Periodontales</p>
-                      <span className="text-[9.5px] text-slate-400 font-light block leading-tight mt-0.5">Formatos de investigación basados en AAP 2018</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* INTEGRATED BACKUP & DATA EXPORT ENGINE */}
-            <DataBackupExport
-              patients={patients}
-              appointments={appointments}
-              aranceles={aranceles}
-              onRestoreData={(restoredPatients, restoredAppointments) => {
-                setPatients(deduplicatePatients(restoredPatients));
-                if (restoredAppointments.length > 0) {
-                  setAppointments(deduplicateAppointments(restoredAppointments));
-                }
-              }}
-            />
           </div>
         );
 
@@ -1849,6 +2197,8 @@ export default function App() {
     // Default entry view: Alternativa 1 (Institutional Landing Page with Bifurcated Access)
     return (
       <LandingPage
+        darkMode={darkMode}
+        onToggleDarkMode={() => setDarkMode(!darkMode)}
         onEnterAsDentist={() => setGuestView("login")}
         onEnterAsPatient={() => {
           setPortalAccessKey("");
@@ -2199,27 +2549,11 @@ export default function App() {
               isSyncing={isSyncingFirebase}
               syncError={firebaseSyncError}
               lastSyncedTime={lastSyncedTime}
-            />
-
-            {/* HIPAA Compliance & Audit Center Trigger */}
-            <button 
-              onClick={() => setShowHipaaCenter(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 rounded-xl transition-all cursor-pointer shadow-2xs group"
-              title="Centro de Cumplimiento HIPAA y Pistas de Auditoría ePHI (45 CFR § 164.312)"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 group-hover:scale-110 transition-transform" />
-              <span className="text-[11px] font-bold">HIPAA Shield</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            </button>
-
-            {/* Security Hardening & PII Privacy Banner / Controls */}
-            <SecurityHardeningBanner
-              darkMode={darkMode}
-              currentUser={activeUser}
-              privacyMode={privacyMode}
-              onTogglePrivacyMode={handleTogglePrivacyMode}
-              inactivityMinutes={inactivityMinutes}
-              onChangeInactivityMinutes={handleChangeInactivityMinutes}
+              onManualSync={handleManualSync}
+              onOpenIntegrations={() => {
+                setActiveTab("ajustes");
+                setAjustesSubTab("integraciones");
+              }}
             />
 
             {/* Quick Search */}
@@ -2497,6 +2831,8 @@ export default function App() {
             </button>
           </div>
           <LandingPage
+            darkMode={darkMode}
+            onToggleDarkMode={() => setDarkMode(!darkMode)}
             onEnterAsDentist={() => setShowLandingModal(false)}
             onEnterAsPatient={() => {
               setShowLandingModal(false);
@@ -2534,6 +2870,19 @@ export default function App() {
         onTogglePrivacyMode={handleTogglePrivacyMode}
         inactivityMinutes={inactivityMinutes}
         onChangeInactivityMinutes={handleChangeInactivityMinutes}
+      />
+
+      {/* Security Hardening & Defensive Shield Modal */}
+      <SecurityHardeningBanner
+        darkMode={darkMode}
+        currentUser={activeUser}
+        privacyMode={privacyMode}
+        onTogglePrivacyMode={handleTogglePrivacyMode}
+        inactivityMinutes={inactivityMinutes}
+        onChangeInactivityMinutes={handleChangeInactivityMinutes}
+        hideTrigger={true}
+        isOpenControlled={showSecurityModal}
+        onCloseControlled={() => setShowSecurityModal(false)}
       />
 
     </div>

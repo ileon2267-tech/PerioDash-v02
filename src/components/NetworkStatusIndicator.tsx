@@ -7,6 +7,7 @@ interface NetworkStatusIndicatorProps {
   syncError: string | null;
   lastSyncedTime?: Date | null;
   onManualSync?: () => void;
+  onOpenIntegrations?: () => void;
 }
 
 export default function NetworkStatusIndicator({
@@ -14,14 +15,23 @@ export default function NetworkStatusIndicator({
   syncError,
   lastSyncedTime,
   onManualSync,
+  onOpenIntegrations,
 }: NetworkStatusIndicatorProps) {
   const [showTooltip, setShowTooltip] = useState(false);
+
+  const handleClick = () => {
+    if (onOpenIntegrations) {
+      onOpenIntegrations();
+    } else if (onManualSync) {
+      onManualSync();
+    }
+  };
 
   return (
     <div className="relative inline-flex items-center">
       <button
         type="button"
-        onClick={onManualSync}
+        onClick={handleClick}
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
         className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-semibold transition-all border cursor-pointer ${

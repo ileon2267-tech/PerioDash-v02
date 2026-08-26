@@ -23,11 +23,36 @@ import {
   PenTool,
   Check,
   ShieldAlert,
-  Info
+  Info,
+  Flame,
+  Zap,
+  Activity,
+  Radio,
+  Sliders,
+  Trash2,
+  PlayCircle,
+  Terminal,
+  AlertOctagon
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Patient, ClinicalUser, HipaaAuditLogEntry, HipaaActionType } from "../types";
 import { getStoredAuditLogs, recordHipaaAudit, maskPII } from "../utils/hipaaAudit";
+import { 
+  getClinicMasterPassphrase, 
+  setClinicMasterPassphrase, 
+  resetClinicMasterPassphrase, 
+  runEphiEncryptionBenchmark,
+  EPHI_CIPHER_VERSION
+} from "../utils/ephiEncryption";
+import {
+  subscribeToFirestoreThreats,
+  dismissFirestoreThreat,
+  clearAllFirestoreThreats,
+  simulateSuspiciousQueryAttack,
+  getFirestoreMetrics,
+  FirestoreQueryMetrics,
+  FirestoreThreatIncident
+} from "../utils/firestoreInterceptor";
 
 interface HipaaComplianceCenterProps {
   isOpen: boolean;
@@ -54,7 +79,7 @@ export default function HipaaComplianceCenter({
   inactivityMinutes,
   onChangeInactivityMinutes
 }: HipaaComplianceCenterProps) {
-  const [activeTab, setActiveTab] = useState<"audit" | "safeguards" | "consents" | "settings">("audit");
+  const [activeTab, setActiveTab] = useState<"audit" | "safeguards" | "dos_guard" | "consents" | "settings">("audit");
   const [auditLogs, setAuditLogs] = useState<HipaaAuditLogEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [actionFilter, setActionFilter] = useState<string>("ALL");
@@ -64,6 +89,26 @@ export default function HipaaComplianceCenter({
   const [consentNppAccepted, setConsentNppAccepted] = useState(true);
   const [consentDisclosureAccepted, setConsentDisclosureAccepted] = useState(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Firestore Read Interceptor & Threat Detection State
+  const [threatMetrics, setThreatMetrics] = useState<FirestoreQueryMetrics>(getFirestoreMetrics());
+  const [selectedIncidentModal, setSelectedIncidentModal] = useState<FirestoreThreatIncident | null>(null);
+  const [isSimulatingAttack, setIsSimulatingAttack] = useState(false);
+
+  // ePHI Client-Side Encryption Management State
+  const [currentPassphrase, setCurrentPassphrase] = useState(getClinicMasterPassphrase());
+  const [isEditingPassphrase, setIsEditingPassphrase] = useState(false);
+  const [passphraseInput, setPassphraseInput] = useState("");
+  const [benchmarkResult, setBenchmarkResult] = useState<{
+    success: boolean;
+    algorithm: string;
+    keyDerivation: string;
+    roundtripTimeMs: number;
+    sampleCipherText: string;
+    ciphertextLength: number;
+    sampleIv: string;
+  } | null>(null);
+  const [isRunningBenchmark, setIsRunningBenchmark] = useState(false);
 
   // Load audit logs on mount & listen to new events
   const refreshLogs = () => {
@@ -82,6 +127,14 @@ export default function HipaaComplianceCenter({
     };
     window.addEventListener("hipaa_audit_recorded", handleLogAdded);
     return () => window.removeEventListener("hipaa_audit_recorded", handleLogAdded);
+  }, []);
+
+  // Subscribe to real-time Firestore Read Interceptor telemetry and threats
+  useEffect(() => {
+    const unsubscribeThreats = subscribeToFirestoreThreats((metrics) => {
+      setThreatMetrics(metrics);
+    });
+    return () => unsubscribeThreats();
   }, []);
 
   const showToast = (msg: string) => {
@@ -273,8 +326,15 @@ export default function HipaaComplianceCenter({
           {[
             { id: "audit", label: "Pistas de Auditoría (§164.312b)", icon: FileText, count: auditLogs.length },
             { id: "safeguards", label: "Salvaguardas Técnicas", icon: ShieldCheck },
+            { 
+              id: "dos_guard", 
+              label: "Guardián DoS & Interceptor", 
+              icon: ShieldAlert, 
+              count: threatMetrics.activeThreatCount > 0 ? threatMetrics.activeThreatCount : undefined,
+              isCritical: threatMetrics.activeThreatCount > 0 
+            },
             { id: "consents", label: "Avisos de Privacidad (NPP)", icon: FileSpreadsheet, count: patients.filter(p => p.hipaaConsent?.signed).length },
-            { id: "settings", label: "Inactividad & Parámetros", icon: Clock }
+            { id: "settings", label: "Inactividad & Cifrado ePHI", icon: Clock }
           ].map(tab => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -285,15 +345,21 @@ export default function HipaaComplianceCenter({
                 onClick={() => setActiveTab(tab.id as any)}
                 className={`py-3 px-3 sm:px-4 text-xs font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer whitespace-nowrap ${
                   isActive
-                    ? "border-teal-500 text-teal-600 dark:text-teal-400 bg-teal-500/5"
+                    ? tab.isCritical 
+                      ? "border-rose-500 text-rose-500 dark:text-rose-400 bg-rose-500/10"
+                      : "border-teal-500 text-teal-600 dark:text-teal-400 bg-teal-500/5"
+                    : tab.isCritical
+                    ? "border-transparent text-rose-500 hover:text-rose-600 dark:text-rose-400 animate-pulse"
                     : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
                 }`}
               >
-                <Icon className="w-4 h-4" />
+                <Icon className={`w-4 h-4 ${tab.isCritical ? "text-rose-500 animate-bounce" : ""}`} />
                 <span>{tab.label}</span>
                 {tab.count !== undefined && (
                   <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full ${
-                    isActive 
+                    tab.isCritical
+                      ? "bg-rose-500 text-white animate-pulse"
+                      : isActive 
                       ? "bg-teal-500/20 text-teal-600 dark:text-teal-400" 
                       : "bg-slate-200 dark:bg-slate-800 text-slate-500"
                   }`}>
@@ -306,7 +372,75 @@ export default function HipaaComplianceCenter({
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+          {/* CRITICAL THREAT ALERT BANNER */}
+          <AnimatePresence>
+            {threatMetrics.activeThreatCount > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: -10, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -10, scale: 0.98 }}
+                className="p-4 rounded-2xl border-2 border-rose-500/60 bg-gradient-to-r from-rose-950/70 via-slate-900/90 to-rose-950/50 text-rose-200 shadow-xl shadow-rose-950/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-3"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="p-2.5 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/40 shrink-0 animate-pulse">
+                    <ShieldAlert className="w-6 h-6" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-display font-black text-xs sm:text-sm text-rose-300 uppercase tracking-wide flex items-center gap-1.5">
+                        <Flame className="w-4 h-4 text-rose-400" />
+                        <span>Alerta de Seguridad: Tráfico Anómalo / Sospecha de DoS en Firestore</span>
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-mono font-black uppercase tracking-wider animate-pulse">
+                        {threatMetrics.activeThreatCount} {threatMetrics.activeThreatCount === 1 ? "Amenaza Activa" : "Amenazas Activas"}
+                      </span>
+                      {threatMetrics.isThrottlingActive && (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[10px] font-mono font-bold">
+                          Throttling Preventivo Activado
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-rose-200/90 leading-snug">
+                      {threatMetrics.threats[0]?.details || "El interceptor detectó un patrón de consultas inusual que excede los límites seguros para información clínica ePHI."}
+                    </p>
+                    <div className="flex items-center gap-3 text-[10.5px] font-mono text-rose-300/80 pt-0.5">
+                      <span>Colección: <strong className="text-white">{threatMetrics.threats[0]?.affectedCollection || "patients"}</strong></span>
+                      <span>•</span>
+                      <span>Ráfaga: <strong className="text-white">{threatMetrics.threats[0]?.queryBurstRate || threatMetrics.readsLast3s} qps</strong></span>
+                      <span>•</span>
+                      <span>Tipo: <strong className="text-white">{threatMetrics.threats[0]?.threatType || "BURST_DOS_ATTACK"}</strong></span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-end md:self-center shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("dos_guard")}
+                    className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all shadow-md shadow-rose-600/30 cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Activity className="w-4 h-4" />
+                    <span>Investigar Guardián</span>
+                  </button>
+                  {threatMetrics.threats[0] && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        dismissFirestoreThreat(threatMetrics.threats[0].id);
+                        showToast("Amenaza descartada del panel principal.");
+                      }}
+                      className="p-2 rounded-xl border border-rose-500/40 hover:bg-rose-500/20 text-rose-300 text-xs transition-all cursor-pointer"
+                      title="Descartar esta alerta"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {/* TAB 1: AUDIT TRAIL */}
           {activeTab === "audit" && (
             <div className="space-y-4">
@@ -494,11 +628,11 @@ export default function HipaaComplianceCenter({
                     badge: "Cumple"
                   },
                   {
-                    rule: "§ 164.312(a)(2)(iv) Cifrado en Reposo",
-                    status: "AES-256 Activo",
-                    desc: "Almacenamiento de expedientes, periodontogramas e imágenes en Google Cloud Firestore con cifrado simétrico por defecto.",
+                    rule: "§ 164.312(a)(2)(iv) Cifrado Zero-Knowledge ePHI",
+                    status: "AES-256-GCM Nativo + PBKDF2",
+                    desc: "Capa de cifrado del lado del cliente antes de enviar datos al servidor. Firestore almacena sólo texto cifrado ininteligible (Zero-Knowledge).",
                     icon: Database,
-                    badge: "Cumple"
+                    badge: "Blindado"
                   },
                   {
                     rule: "§ 164.312(b) Controles de Auditoría",
@@ -572,6 +706,349 @@ export default function HipaaComplianceCenter({
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: FIRESTORE READ INTERCEPTOR & DOS GUARDIAN (§164.312) */}
+          {activeTab === "dos_guard" && (
+            <div className="space-y-5">
+              {/* Header & Status Card */}
+              <div className={`p-4 sm:p-5 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 ${
+                threatMetrics.activeThreatCount > 0
+                  ? "bg-rose-950/30 border-rose-500/40"
+                  : darkMode
+                  ? "bg-slate-950/60 border-slate-800"
+                  : "bg-teal-50/50 border-teal-200"
+              }`}>
+                <div className="flex items-start sm:items-center gap-3">
+                  <div className={`p-3 rounded-2xl border shrink-0 ${
+                    threatMetrics.activeThreatCount > 0
+                      ? "bg-rose-500/20 border-rose-500/40 text-rose-400 animate-pulse"
+                      : "bg-teal-500/20 border-teal-500/30 text-teal-500"
+                  }`}>
+                    <ShieldAlert className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="font-display font-bold text-sm sm:text-base text-slate-900 dark:text-white flex items-center gap-2">
+                        <span>Guardián de Flujo Firestore & Detección de DoS</span>
+                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                          threatMetrics.activeThreatCount > 0
+                            ? "bg-rose-500 text-white"
+                            : "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30"
+                        }`}>
+                          {threatMetrics.activeThreatCount > 0 ? `${threatMetrics.activeThreatCount} Amenazas Detectadas` : "Escudo 100% Activo"}
+                        </span>
+                      </h4>
+                    </div>
+                    <p className={`text-xs mt-0.5 ${darkMode ? "text-slate-400" : "text-slate-600"}`}>
+                      Monitoreo perimetral en tiempo real que intercepta consultas sospechosas, ráfagas DoS y anomalías criptográficas sobre colecciones clínicas (45 CFR § 164.312(b)).
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-stretch sm:self-auto justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearAllFirestoreThreats();
+                      showToast("Registro de amenazas de Firestore restablecido.");
+                    }}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
+                      darkMode
+                        ? "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
+                        : "bg-white border-slate-200 text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Limpiar Registro</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Throttling Notice */}
+              {threatMetrics.isThrottlingActive && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  className="p-3.5 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-3"
+                >
+                  <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 animate-bounce" />
+                  <div className="flex-1">
+                    <strong className="font-bold text-amber-200">Circuit Breaker & Throttling Preventivo Activado:</strong>
+                    <span className="ml-1 text-amber-200/90">
+                      Se está aplicando un retraso de seguridad de 15 segundos para proteger el consumo de cuota de Firestore y enfriar posibles ráfagas automatizadas.
+                    </span>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Realtime Telemetry Metric Cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className={`p-4 rounded-2xl border space-y-1 ${
+                  darkMode ? "bg-slate-950/60 border-slate-800" : "bg-white border-slate-200"
+                }`}>
+                  <div className="flex items-center justify-between text-xs text-slate-400">
+                    <span className="font-semibold flex items-center gap-1">
+                      <Zap className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Ráfaga (Ventana 3s)</span>
+                    </span>
+                    <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-md ${
+                      threatMetrics.readsLast3s >= 12
+                        ? "bg-rose-500 text-white"
+                        : threatMetrics.readsLast3s >= 8
+                        ? "bg-amber-500 text-black"
+                        : "bg-emerald-500/20 text-emerald-400"
+                    }`}>
+                      {threatMetrics.readsLast3s >= 12 ? "CRÍTICO" : threatMetrics.readsLast3s >= 8 ? "ELEVADO" : "NORMAL"}
+                    </span>
+                  </div>
+                  <div className="text-2xl font-mono font-black text-slate-900 dark:text-white">
+                    {threatMetrics.readsLast3s} <span className="text-xs font-normal text-slate-400">lecturas</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500">Umbral DoS: ≥12 lecturas en 3.0s</p>
+                </div>
+
+                <div className={`p-4 rounded-2xl border space-y-1 ${
+                  darkMode ? "bg-slate-950/60 border-slate-800" : "bg-white border-slate-200"
+                }`}>
+                  <div className="flex items-center justify-between text-xs text-slate-400">
+                    <span className="font-semibold flex items-center gap-1">
+                      <Activity className="w-3.5 h-3.5 text-teal-400" />
+                      <span>Volumen (Ventana 60s)</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-teal-500 font-bold">1 Min</span>
+                  </div>
+                  <div className="text-2xl font-mono font-black text-slate-900 dark:text-white">
+                    {threatMetrics.readsLast60s} <span className="text-xs font-normal text-slate-400">lecturas</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500">Umbral Scraping: ≥40 / minuto</p>
+                </div>
+
+                <div className={`p-4 rounded-2xl border space-y-1 ${
+                  darkMode ? "bg-slate-950/60 border-slate-800" : "bg-white border-slate-200"
+                }`}>
+                  <div className="flex items-center justify-between text-xs text-slate-400">
+                    <span className="font-semibold flex items-center gap-1">
+                      <Flame className="w-3.5 h-3.5 text-rose-400" />
+                      <span>Pico Histórico QPS</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-500">Max Burst</span>
+                  </div>
+                  <div className="text-2xl font-mono font-black text-slate-900 dark:text-white">
+                    {threatMetrics.peakBurstQps} <span className="text-xs font-normal text-slate-400">qps</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500">Ráfaga máxima registrada</p>
+                </div>
+
+                <div className={`p-4 rounded-2xl border space-y-1 ${
+                  darkMode ? "bg-slate-950/60 border-slate-800" : "bg-white border-slate-200"
+                }`}>
+                  <div className="flex items-center justify-between text-xs text-slate-400">
+                    <span className="font-semibold flex items-center gap-1">
+                      <Database className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Total Interceptadas</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-emerald-400 font-bold">100% Zero-Trust</span>
+                  </div>
+                  <div className="text-2xl font-mono font-black text-slate-900 dark:text-white">
+                    {threatMetrics.totalReadsIntercepted}
+                  </div>
+                  <p className="text-[10px] text-slate-500">Consultas validadas por el filtro</p>
+                </div>
+              </div>
+
+              {/* Interactive Threat Simulation & Audit Sandbox */}
+              <div className={`p-4 sm:p-5 rounded-2xl border space-y-3 ${
+                darkMode ? "bg-slate-950/40 border-slate-800" : "bg-slate-50 border-slate-200"
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-teal-500" />
+                    <h5 className="font-bold text-xs uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                      Laboratorio de Pruebas de Intrusión & Verificación de Alertas (§164.312b)
+                    </h5>
+                  </div>
+                  <span className="text-[10px] font-mono text-slate-400 hidden sm:inline">Auditoría HIPAA en Vivo</span>
+                </div>
+                <p className={`text-xs leading-relaxed ${darkMode ? "text-slate-400" : "text-slate-600"}`}>
+                  Ejecuta simulaciones controladas de patrones adversarios para validar que el interceptor bloquea, registra en la auditoría inmutable y dispara la alerta visual en tiempo real:
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    disabled={isSimulatingAttack}
+                    onClick={() => {
+                      simulateSuspiciousQueryAttack("burst_dos");
+                      showToast("Simulación de Ráfaga DoS (16 queries) ejecutada con éxito.");
+                    }}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                      darkMode
+                        ? "bg-slate-900 border-rose-500/30 hover:border-rose-500/60 hover:bg-rose-500/5 text-slate-200"
+                        : "bg-white border-rose-200 hover:border-rose-400 hover:bg-rose-50 text-slate-800"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-xs text-rose-500 flex items-center gap-1.5">
+                        <Flame className="w-3.5 h-3.5" />
+                        <span>1. Ráfaga DoS (16 qps)</span>
+                      </span>
+                      <PlayCircle className="w-4 h-4 text-rose-400" />
+                    </div>
+                    <p className="text-[10.5px] text-slate-400 leading-snug">
+                      Dispara ráfaga de lecturas concurrentes que supera el umbral de 3 segundos e inicia throttling.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isSimulatingAttack}
+                    onClick={() => {
+                      simulateSuspiciousQueryAttack("scraping");
+                      showToast("Simulación de Scraping Masivo (45 queries) ejecutada.");
+                    }}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                      darkMode
+                        ? "bg-slate-900 border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/5 text-slate-200"
+                        : "bg-white border-amber-200 hover:border-amber-400 hover:bg-amber-50 text-slate-800"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-xs text-amber-500 flex items-center gap-1.5">
+                        <Zap className="w-3.5 h-3.5" />
+                        <span>2. Scraping Masivo (45 qpm)</span>
+                      </span>
+                      <PlayCircle className="w-4 h-4 text-amber-400" />
+                    </div>
+                    <p className="text-[10.5px] text-slate-400 leading-snug">
+                      Simula extracción sostenida de expedientes ePHI que satura la ventana de 60 segundos.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isSimulatingAttack}
+                    onClick={() => {
+                      simulateSuspiciousQueryAttack("decryption_tamper");
+                      showToast("Simulación de Manipulación Criptográfica (4 fallos) ejecutada.");
+                    }}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                      darkMode
+                        ? "bg-slate-900 border-indigo-500/30 hover:border-indigo-500/60 hover:bg-indigo-500/5 text-slate-200"
+                        : "bg-white border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50 text-slate-800"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-xs text-indigo-400 flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>3. Manipulación ePHI</span>
+                      </span>
+                      <PlayCircle className="w-4 h-4 text-indigo-400" />
+                    </div>
+                    <p className="text-[10.5px] text-slate-400 leading-snug">
+                      Simula anomalías en el descifrado del cliente provocadas por alteración de datos o clave inválida.
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Threat Incidents Table / Feed */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Radio className="w-4 h-4 text-rose-500 animate-pulse" />
+                    <h5 className="font-bold text-sm text-slate-900 dark:text-white">
+                      Registro de Incidentes de Tráfico & Amenazas Detectadas
+                    </h5>
+                  </div>
+                  <span className="text-xs font-mono text-slate-400">
+                    {threatMetrics.threats.length} {threatMetrics.threats.length === 1 ? "incidente registrado" : "incidentes registrados"}
+                  </span>
+                </div>
+
+                <div className={`rounded-2xl border overflow-hidden ${
+                  darkMode ? "border-slate-800 bg-slate-950/50" : "border-slate-200 bg-white"
+                }`}>
+                  {threatMetrics.threats.length === 0 ? (
+                    <div className="p-8 text-center space-y-2">
+                      <div className="inline-flex p-3 rounded-full bg-emerald-500/10 text-emerald-500">
+                        <ShieldCheck className="w-6 h-6" />
+                      </div>
+                      <h6 className="font-bold text-xs text-slate-700 dark:text-slate-200">
+                        No se registran amenazas activas ni anomalías de tráfico
+                      </h6>
+                      <p className="text-[11px] text-slate-400 max-w-md mx-auto">
+                        El interceptor continúa analizando cada petición de lectura y descifrado ePHI en Firestore en tiempo real.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-slate-200 dark:divide-slate-800">
+                      {threatMetrics.threats.map((threat) => {
+                        const dateObj = new Date(threat.detectedAt);
+                        const formattedTime = dateObj.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+                        const formattedDate = dateObj.toLocaleDateString("es-CL", { day: "2-digit", month: "short" });
+
+                        return (
+                          <div key={threat.id} className="p-4 hover:bg-slate-500/5 transition-colors space-y-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase ${
+                                  threat.severity === "critical"
+                                    ? "bg-rose-500 text-white"
+                                    : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                                }`}>
+                                  {threat.severity === "critical" ? "CRÍTICO" : "ADVERTENCIA"}
+                                </span>
+                                <span className="font-bold text-xs text-slate-800 dark:text-slate-100">
+                                  {threat.threatType === "BURST_DOS_ATTACK"
+                                    ? "Ataque de Ráfaga DoS en Firestore"
+                                    : threat.threatType === "SCRAPING_EXFILTRATION"
+                                    ? "Sospecha de Extracción / Scraping Masivo"
+                                    : "Manipulación Criptográfica / Fallos ePHI"}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <span className="text-[11px] font-mono text-slate-400">
+                                  {formattedDate} {formattedTime}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedIncidentModal(threat)}
+                                  className="px-2.5 py-1 rounded-lg border border-teal-500/30 hover:bg-teal-500/10 text-teal-400 text-[11px] font-semibold transition-all cursor-pointer"
+                                >
+                                  Forense
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    dismissFirestoreThreat(threat.id);
+                                    showToast("Incidente descartado.");
+                                  }}
+                                  className="px-2.5 py-1 rounded-lg border border-slate-700 hover:bg-slate-800 text-slate-400 hover:text-slate-200 text-[11px] transition-all cursor-pointer"
+                                >
+                                  Descartar
+                                </button>
+                              </div>
+                            </div>
+
+                            <p className={`text-xs leading-relaxed ${darkMode ? "text-slate-300" : "text-slate-600"}`}>
+                              {threat.details}
+                            </p>
+
+                            <div className="flex flex-wrap items-center gap-4 text-[11px] font-mono text-slate-400 pt-1 border-t border-slate-200 dark:border-slate-800/60">
+                              <span>Colección afectada: <strong className="text-teal-400">{threat.affectedCollection}</strong></span>
+                              <span>Ráfaga detectada: <strong className="text-white">{threat.queryBurstRate} qps</strong></span>
+                              <span>Mitigación: <strong className="text-emerald-400">{threat.mitigationStatus}</strong></span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -765,6 +1242,170 @@ export default function HipaaComplianceCenter({
           {/* TAB 4: SECURITY SETTINGS & INACTIVITY */}
           {activeTab === "settings" && (
             <div className="space-y-6 max-w-2xl">
+              {/* Zero-Knowledge ePHI Client-Side Encryption Panel */}
+              <div className={`p-5 rounded-2xl border space-y-4 ${
+                darkMode ? "bg-slate-950/60 border-teal-500/30" : "bg-teal-50/50 border-teal-200"
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-teal-500/20 text-teal-500 border border-teal-500/30">
+                      <Lock className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-sm">Cifrado del Lado del Cliente (Zero-Knowledge ePHI)</h4>
+                        <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 uppercase">
+                          AES-256-GCM
+                        </span>
+                      </div>
+                      <p className={`text-xs ${darkMode ? "text-slate-400" : "text-slate-600"}`}>
+                        Toda la información médica y de citas se cifra en el navegador antes de transmitirse a Firestore. La nube nunca ve texto plano.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Benchmark Runner */}
+                <div className={`p-4 rounded-xl border space-y-3 ${
+                  darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-bold flex items-center gap-1.5 text-teal-600 dark:text-teal-400">
+                        <RefreshCw className={`w-3.5 h-3.5 ${isRunningBenchmark ? "animate-spin" : ""}`} />
+                        <span>Verificación Criptográfica en Tiempo Real</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Prueba el ciclo de cifrado y descifrado nativo (Web Crypto API) con un registro clínico simulado.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={isRunningBenchmark}
+                      onClick={async () => {
+                        setIsRunningBenchmark(true);
+                        try {
+                          const res = await runEphiEncryptionBenchmark();
+                          setBenchmarkResult(res);
+                          showToast(`Benchmark completado en ${res.roundtripTimeMs} ms con éxito.`);
+                        } catch (err: any) {
+                          showToast(`Error en benchmark: ${err.message}`);
+                        } finally {
+                          setIsRunningBenchmark(false);
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      {isRunningBenchmark ? "Probando..." : "Ejecutar Benchmark"}
+                    </button>
+                  </div>
+
+                  {benchmarkResult && (
+                    <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 space-y-2 text-[11px]">
+                      <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 font-bold">
+                        <span className="flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Prueba Exitosa: Ciclo Cifrado / Descifrado ePHI</span>
+                        </span>
+                        <span className="font-mono">{benchmarkResult.roundtripTimeMs} ms</span>
+                      </div>
+                      <div className="text-slate-400 space-y-0.5">
+                        <div><strong>Algoritmo:</strong> {benchmarkResult.algorithm}</div>
+                        <div><strong>Derivación de Clave:</strong> {benchmarkResult.keyDerivation}</div>
+                        <div><strong>Longitud Payload Cifrado:</strong> {benchmarkResult.ciphertextLength} caracteres Base64</div>
+                        <div className="truncate font-mono text-[10px] bg-slate-950/40 p-1.5 rounded text-slate-300">
+                          <strong>Blob visible en Firestore:</strong> {benchmarkResult.sampleCipherText.slice(0, 60)}...
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Passphrase Manager */}
+                <div className={`p-4 rounded-xl border space-y-3 ${
+                  darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-bold flex items-center gap-1.5">
+                        <KeyRound className="w-3.5 h-3.5 text-amber-500" />
+                        <span>Frase Maestra de Derivación Criptográfica (PBKDF2)</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Clave secreta compartida en el navegador para derivar las llaves AES-256 de la clínica.
+                      </p>
+                    </div>
+                    {!isEditingPassphrase && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPassphraseInput(currentPassphrase);
+                          setIsEditingPassphrase(true);
+                        }}
+                        className="px-3 py-1 text-xs rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800 cursor-pointer"
+                      >
+                        Personalizar Clave
+                      </button>
+                    )}
+                  </div>
+
+                  {isEditingPassphrase ? (
+                    <div className="space-y-2 pt-1">
+                      <input
+                        type="text"
+                        value={passphraseInput}
+                        onChange={(e) => setPassphraseInput(e.target.value)}
+                        placeholder="Ingresa la nueva frase maestra de la clínica (mín. 10 caracteres)"
+                        className={`w-full p-2 text-xs rounded-lg border font-mono outline-none ${
+                          darkMode ? "bg-slate-950 border-slate-800 text-white" : "bg-slate-50 border-slate-300 text-slate-900"
+                        }`}
+                      />
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (passphraseInput.trim().length < 10) {
+                              showToast("La frase maestra debe tener al menos 10 caracteres de longitud.");
+                              return;
+                            }
+                            setClinicMasterPassphrase(passphraseInput.trim());
+                            setCurrentPassphrase(passphraseInput.trim());
+                            setIsEditingPassphrase(false);
+                            showToast("Frase maestra de cifrado actualizada con éxito.");
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold cursor-pointer"
+                        >
+                          Guardar y Aplicar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            resetClinicMasterPassphrase();
+                            setCurrentPassphrase(getClinicMasterPassphrase());
+                            setIsEditingPassphrase(false);
+                            showToast("Frase maestra restablecida a la predeterminada del sistema.");
+                          }}
+                          className="px-3 py-1.5 rounded-lg border border-rose-500/30 text-rose-400 hover:bg-rose-500/10 text-xs font-bold cursor-pointer"
+                        >
+                          Restablecer Predeterminada
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingPassphrase(false)}
+                          className="px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 text-xs cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between text-[11px] font-mono bg-slate-950/40 p-2 rounded-lg text-slate-400">
+                      <span>Clave activa: •••••••••••••••••••••••• ({currentPassphrase.length} caracteres)</span>
+                      <span className="text-emerald-400 font-sans font-bold text-[10px]">Derivación PBKDF2 100k it.</span>
+                    </div>
+                  )}
+                </div>
+              </div>
               {/* Inactivity Timeout Config */}
               <div className={`p-5 rounded-2xl border space-y-4 ${
                 darkMode ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"
@@ -853,6 +1494,96 @@ export default function HipaaComplianceCenter({
             </div>
           )}
         </div>
+
+        {/* Forensic Incident Details Modal */}
+        <AnimatePresence>
+          {selectedIncidentModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md"
+            >
+              <motion.div
+                initial={{ scale: 0.95, y: 15 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.95, y: 15 }}
+                className={`w-full max-w-xl p-6 rounded-3xl border shadow-2xl space-y-4 ${
+                  darkMode ? "bg-slate-900 border-rose-500/30 text-white" : "bg-white border-slate-200 text-slate-900"
+                }`}
+              >
+                <div className="flex items-center justify-between border-b pb-3 border-slate-200 dark:border-slate-800">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-rose-500/20 text-rose-400">
+                      <ShieldAlert className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-900 dark:text-white">Diagnóstico Forense de Amenaza</h4>
+                      <p className="text-[10px] font-mono text-slate-400">ID: {selectedIncidentModal.id}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedIncidentModal(null)}
+                    className="p-1 rounded-lg text-slate-400 hover:text-slate-200"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className={`p-3 rounded-xl border ${darkMode ? "bg-slate-950 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+                      <span className="text-slate-400 text-[10px] uppercase font-bold block mb-0.5">Tipo de Incidente</span>
+                      <span className="font-mono font-bold text-rose-400">{selectedIncidentModal.threatType}</span>
+                    </div>
+                    <div className={`p-3 rounded-xl border ${darkMode ? "bg-slate-950 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+                      <span className="text-slate-400 text-[10px] uppercase font-bold block mb-0.5">Colección Objetivo</span>
+                      <span className="font-mono font-bold text-teal-400">{selectedIncidentModal.affectedCollection}</span>
+                    </div>
+                  </div>
+
+                  <div className={`p-3 rounded-xl border ${darkMode ? "bg-slate-950 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+                    <span className="text-slate-400 text-[10px] uppercase font-bold block mb-0.5">Detalles del Vector de Ataque</span>
+                    <p className="leading-relaxed font-sans">{selectedIncidentModal.details}</p>
+                  </div>
+
+                  <div className={`p-3 rounded-xl border ${darkMode ? "bg-slate-950 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+                    <span className="text-slate-400 text-[10px] uppercase font-bold block mb-0.5">Telemetría de Lecturas en Bruto (JSON)</span>
+                    <pre className="text-[10px] font-mono text-emerald-400 bg-slate-950 p-2.5 rounded-lg overflow-x-auto max-h-36">
+                      {JSON.stringify(selectedIncidentModal.rawMetrics, null, 2)}
+                    </pre>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-teal-500/10 border border-teal-500/20 text-teal-300 text-[11px] leading-relaxed">
+                    <strong>Salvaguarda Técnica Aplicada:</strong> El interceptor limitó las ráfagas concurrentes mediante retardo preventivo y generó una pista de auditoría SHA-256 inmutable en el registro de conformidad § 164.312(b).
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      dismissFirestoreThreat(selectedIncidentModal.id);
+                      setSelectedIncidentModal(null);
+                      showToast("Incidente cerrado y archivado.");
+                    }}
+                    className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs cursor-pointer"
+                  >
+                    Descartar Amenaza
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedIncidentModal(null)}
+                    className="px-3.5 py-1.5 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs cursor-pointer"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Toast Notification */}
         <AnimatePresence>

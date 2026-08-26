@@ -6,11 +6,12 @@ import {
   Armchair, Clock, Layers, Award, BarChart3, Filter
 } from "lucide-react";
 import { motion } from "motion/react";
-import { 
-  ResponsiveContainer, AreaChart, Area, BarChart, Bar, 
-  XAxis, YAxis, Tooltip, CartesianGrid, Legend, PieChart, Pie, Cell, ReferenceLine 
-} from "recharts";
 import { ClinicalFlowTracker } from "./ClinicalFlowTracker";
+import { 
+  PerioSuccessBarChart, 
+  ClinicalCohortDonutChart, 
+  ChairOccupancyAreaChart 
+} from "./KPIDashboardCharts";
 
 interface KPIDashboardProps {
   patients: Patient[];
@@ -757,66 +758,9 @@ function KPIDashboardComponent({
                   <span className="text-[11px] font-mono text-slate-400 font-bold">N = {perioSuccessAnalytics.totalProcedures} Procedimientos</span>
                 </div>
 
-                <div className="h-64 sm:h-72 w-full bg-white/40 dark:bg-slate-950/40 rounded-2xl p-3 border border-slate-200/50 dark:border-slate-800/60">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={perioSuccessAnalytics.categoriesData}
-                      margin={{ top: 20, right: 20, left: -10, bottom: 20 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.15)" vertical={false} />
-                      <XAxis 
-                        dataKey="name" 
-                        stroke="#94a3b8" 
-                        fontSize={11} 
-                        tickLine={false} 
-                        axisLine={false}
-                        dy={8}
-                      />
-                      <YAxis 
-                        stroke="#94a3b8" 
-                        fontSize={11} 
-                        tickLine={false} 
-                        axisLine={false}
-                        domain={[0, 100]}
-                        tickFormatter={(val) => `${val}%`}
-                      />
-                      <Tooltip
-                        cursor={{ fill: "rgba(13, 148, 136, 0.08)" }}
-                        content={({ active, payload }) => {
-                          if (active && payload && payload.length) {
-                            const data = payload[0].payload;
-                            return (
-                              <div className="bg-slate-900/95 text-white p-3 rounded-xl shadow-2xl border border-slate-700 text-xs space-y-1.5 backdrop-blur-md">
-                                <p className="font-bold text-teal-400">{data.name}</p>
-                                <p className="text-slate-300 flex justify-between gap-4">
-                                  <span>Tasa de Éxito:</span>
-                                  <strong className="text-emerald-400 font-mono">{data.tasaExito}%</strong>
-                                </p>
-                                <p className="text-slate-400 flex justify-between gap-4 text-[11px]">
-                                  <span>Completados con Éxito:</span>
-                                  <span className="font-mono text-white">{data.completados} de {data.total}</span>
-                                </p>
-                              </div>
-                            );
-                          }
-                          return null;
-                        }}
-                      />
-                      <Bar 
-                        dataKey="tasaExito" 
-                        fill="#0d9488" 
-                        radius={[8, 8, 0, 0]} 
-                        barSize={38}
-                      >
-                        {perioSuccessAnalytics.categoriesData.map((entry, index) => (
-                          <Cell 
-                            key={`cell-${index}`} 
-                            fill={index === 0 ? "#0d9488" : index === 1 ? "#0ea5e9" : index === 2 ? "#10b981" : "#6366f1"} 
-                          />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+                <div className="h-64 sm:h-72 w-full bg-white/40 dark:bg-slate-950/40 rounded-2xl p-3 border border-slate-200/50 dark:border-slate-800/60 relative overflow-hidden">
+                  <div className="absolute inset-0 opacity-[0.07] dark:opacity-[0.12] pointer-events-none bg-[radial-gradient(#94a3b8_1px,transparent_1px)] [background-size:16px_16px]" />
+                  <PerioSuccessBarChart categoriesData={perioSuccessAnalytics.categoriesData} />
                 </div>
               </div>
 
@@ -831,48 +775,10 @@ function KPIDashboardComponent({
                 </div>
 
                 <div className="h-64 sm:h-72 w-full bg-white/40 dark:bg-slate-950/40 rounded-2xl p-3 border border-slate-200/50 dark:border-slate-800/60 flex flex-col justify-center items-center">
-                  <ResponsiveContainer width="100%" height="65%">
-                    <PieChart>
-                      <Pie
-                        data={perioSuccessAnalytics.statusDistributionData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={45}
-                        outerRadius={75}
-                        paddingAngle={3}
-                        dataKey="value"
-                      >
-                        {perioSuccessAnalytics.statusDistributionData.map((entry, index) => (
-                          <Cell key={`cell-pie-${index}`} fill={entry.color} stroke="transparent" />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        content={({ active, payload }) => {
-                          if (active && payload && payload.length) {
-                            const data = payload[0].payload;
-                            return (
-                              <div className="bg-slate-900/95 text-white p-2.5 rounded-xl shadow-2xl border border-slate-700 text-xs backdrop-blur-md">
-                                <p className="font-bold" style={{ color: data.color }}>{data.name}</p>
-                                <p className="text-slate-300 font-mono mt-0.5">{data.value} Pacientes</p>
-                              </div>
-                            );
-                          }
-                          return null;
-                        }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-
-                  {/* Micro Legend */}
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] w-full px-2 pt-1 border-t border-slate-200/40 dark:border-slate-800/60">
-                    {perioSuccessAnalytics.statusDistributionData.map((item, idx) => (
-                      <div key={idx} className="flex items-center gap-1.5 truncate">
-                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
-                        <span className="text-slate-600 dark:text-slate-400 truncate">{item.name.split("(")[0]}</span>
-                        <span className="font-mono font-bold text-slate-800 dark:text-slate-200 ml-auto">{item.value}</span>
-                      </div>
-                    ))}
-                  </div>
+                  <ClinicalCohortDonutChart 
+                    statusDistributionData={perioSuccessAnalytics.statusDistributionData}
+                    totalPatients={patients.length}
+                  />
                 </div>
               </div>
             </div>
@@ -954,80 +860,9 @@ function KPIDashboardComponent({
                 </div>
               </div>
 
-              <div className="h-64 sm:h-80 w-full bg-white/40 dark:bg-slate-950/40 rounded-2xl p-3 border border-slate-200/50 dark:border-slate-800/60">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart
-                    data={chairOccupancyAnalytics.dailyTimeline}
-                    margin={{ top: 20, right: 20, left: -10, bottom: 10 }}
-                  >
-                    <defs>
-                      <linearGradient id="colorOcupacion" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#0284c7" stopOpacity={0.4} />
-                        <stop offset="95%" stopColor="#0284c7" stopOpacity={0.0} />
-                      </linearGradient>
-                      <linearGradient id="colorConfirmadas" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#0d9488" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#0d9488" stopOpacity={0.0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.15)" vertical={false} />
-                    <XAxis 
-                      dataKey="label" 
-                      stroke="#94a3b8" 
-                      fontSize={11} 
-                      tickLine={false} 
-                      axisLine={false}
-                      interval={3}
-                      dy={5}
-                    />
-                    <YAxis 
-                      stroke="#94a3b8" 
-                      fontSize={11} 
-                      tickLine={false} 
-                      axisLine={false}
-                      domain={[0, 100]}
-                      tickFormatter={(val) => `${val}%`}
-                    />
-                    <ReferenceLine y={80} stroke="#f59e0b" strokeDasharray="4 4" opacity={0.7} />
-                    <Tooltip
-                      content={({ active, payload }) => {
-                        if (active && payload && payload.length) {
-                          const data = payload[0].payload;
-                          return (
-                            <div className="bg-slate-900/95 text-white p-3 rounded-xl shadow-2xl border border-slate-700 text-xs space-y-1.5 backdrop-blur-md">
-                              <p className="font-bold text-sky-400">{data.label} ({data.date})</p>
-                              <div className="space-y-1 border-t border-slate-700/80 pt-1.5 font-mono">
-                                <p className="text-slate-300 flex justify-between gap-4">
-                                  <span>Ocupación Global:</span>
-                                  <strong className="text-sky-300">{data.ocupacionPct}%</strong>
-                                </p>
-                                <p className="text-slate-300 flex justify-between gap-4">
-                                  <span>Citas Atendidas/Conf:</span>
-                                  <strong className="text-emerald-400">{data.confirmadas} de {data.citas}</strong>
-                                </p>
-                                <div className="text-[10px] text-slate-400 pt-1 grid grid-cols-2 gap-1 border-t border-slate-800">
-                                  <span>Sillón 1 (Perio): {data.sillon1}</span>
-                                  <span>Sillón 2 (Gen): {data.sillon2}</span>
-                                  <span>Sillón 3 (Rehab): {data.sillon3}</span>
-                                  <span>Gabinete Qx: {data.gabineteQx}</span>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        }
-                        return null;
-                      }}
-                    />
-                    <Area 
-                      type="monotone" 
-                      dataKey="ocupacionPct" 
-                      stroke="#0284c7" 
-                      strokeWidth={2.5}
-                      fillOpacity={1} 
-                      fill="url(#colorOcupacion)" 
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+              <div className="h-64 sm:h-80 w-full bg-white/40 dark:bg-slate-950/40 rounded-2xl p-3 border border-slate-200/50 dark:border-slate-800/60 relative overflow-hidden">
+                <div className="absolute inset-0 opacity-[0.07] dark:opacity-[0.12] pointer-events-none bg-[radial-gradient(#94a3b8_1px,transparent_1px)] [background-size:16px_16px]" />
+                <ChairOccupancyAreaChart dailyTimeline={chairOccupancyAnalytics.dailyTimeline} />
               </div>
             </div>
 

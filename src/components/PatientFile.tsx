@@ -365,178 +365,165 @@ Acepto y entiendo los siguientes riesgos clínicos y advertencias fundamentales:
       exit={{ opacity: 0, y: -5 }}
       className="w-full text-slate-800 dark:text-slate-200 overflow-hidden rounded-2xl"
     >
-      {/* Real-time Clinical Flow & Chair Tracker Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-teal-950 text-white p-3.5 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 border border-teal-500/30 transition-all cursor-pointer flex items-center gap-1.5 text-xs font-bold shrink-0"
-              title="Cerrar ficha y volver al directorio de pacientes"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              <span className="hidden sm:inline">Directorio</span>
-            </button>
-          )}
-          <div className="p-2 rounded-xl bg-teal-500/20 text-teal-400 border border-teal-500/30">
-            <User className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-bold text-slate-300">Trazabilidad Clínica en Tiempo Real:</span>
-              <span className={`px-2.5 py-0.5 rounded-full text-xs font-extrabold uppercase border ${
-                patient.flowStatus === 'en_sillon' 
-                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 animate-pulse'
-                  : patient.flowStatus === 'espera'
-                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
-                  : patient.flowStatus === 'atendido'
-                  ? 'bg-sky-500/20 border-sky-500/40 text-sky-300'
-                  : patient.flowStatus === 'completado'
-                  ? 'bg-teal-500/20 border-teal-500/40 text-teal-300'
-                  : patient.flowStatus === 'ausente'
-                  ? 'bg-rose-500/20 border-rose-500/40 text-rose-300'
-                  : 'bg-slate-700/50 border-slate-600 text-slate-300'
-              }`}>
-                {patient.flowStatus === 'en_sillon' ? `🟢 En Sillón (${patient.chairAssigned || 'Sillón 1'})`
-                 : patient.flowStatus === 'espera' ? `🟡 En Sala de Espera (${patient.checkInTime ? `Llegó ${patient.checkInTime}` : 'En Recepción'})`
-                 : patient.flowStatus === 'atendido' ? '🔵 Atendido / En Salida'
-                 : patient.flowStatus === 'completado' ? '✅ Consulta Finalizada'
-                 : patient.flowStatus === 'ausente' ? '🔴 Ausente'
-                 : '⚪ Programado en Agenda'}
-              </span>
+      {/* Clean Unified Header: Patient Identification & Clinical Flow */}
+      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 p-4 md:p-5 transition-colors">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          
+          {/* Patient Info */}
+          <div className="flex items-center gap-3.5 min-w-0">
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer flex items-center gap-1.5 text-xs font-bold shrink-0"
+                title="Cerrar ficha y volver al directorio de pacientes"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span className="hidden sm:inline">Directorio</span>
+              </button>
+            )}
+
+            <div className="w-11 h-11 rounded-2xl bg-teal-50 dark:bg-teal-950/50 border border-teal-200 dark:border-teal-800/60 flex items-center justify-center font-display font-black text-teal-700 dark:text-teal-300 text-base shrink-0 shadow-2xs">
+              {patient.name.charAt(0)}
             </div>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              Actualizar ubicación física del paciente para informar a recepción y equipo clínico
-            </p>
+
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base md:text-lg font-bold text-slate-900 dark:text-white tracking-tight truncate">
+                  {patient.name}
+                </h2>
+                {patient.rut ? (
+                  <span className="px-2 py-0.5 rounded-lg bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800/60 text-xs font-mono font-bold">
+                    RUT: {patient.rut}
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 text-[11px] font-mono">
+                    Sin RUT
+                  </span>
+                )}
+              </div>
+
+              <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-3 mt-1 flex-wrap font-medium">
+                <span className="font-mono bg-slate-100 dark:bg-slate-800/80 px-1.5 py-0.5 rounded-md text-slate-600 dark:text-slate-400 text-[11px]">
+                  #{patient.id.split('-')[1] || patient.id}
+                </span>
+                {patient.birthdate && <span>🎂 {patient.birthdate}</span>}
+                {patient.phone && <span>📞 {patient.phone}</span>}
+                {patient.email && <span className="hidden sm:inline">✉️ {patient.email}</span>}
+              </div>
+            </div>
           </div>
-        </div>
 
-        {/* Quick Flow Transition Action Buttons */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <button
-            type="button"
-            onClick={() => {
-              const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              onUpdatePatient({
-                ...patient,
-                flowStatus: 'espera',
-                checkInTime: patient.checkInTime || now,
-                statusUpdatedAt: now
-              });
-            }}
-            className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-              patient.flowStatus === 'espera' 
-                ? 'bg-amber-500 text-slate-950 font-black border-amber-400 shadow-sm' 
-                : 'bg-slate-800/80 hover:bg-slate-700 text-amber-300 border-amber-500/30'
-            }`}
-          >
-            🟡 LLegó / En Espera
-          </button>
+          {/* Real-time Clinical Flow Pill-Group */}
+          <div className="flex items-center gap-1.5 flex-wrap bg-slate-50 dark:bg-slate-800/60 p-1.5 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 self-start lg:self-auto">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 px-2 hidden xl:inline">
+              Ubicación:
+            </span>
 
-          <button
-            type="button"
-            onClick={() => {
-              const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              onUpdatePatient({
-                ...patient,
-                flowStatus: 'en_sillon',
-                chairAssigned: patient.chairAssigned || 'Sillón 1',
-                statusUpdatedAt: now
-              });
-            }}
-            className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-              patient.flowStatus === 'en_sillon' 
-                ? 'bg-emerald-500 text-slate-950 font-black border-emerald-400 shadow-sm' 
-                : 'bg-slate-800/80 hover:bg-slate-700 text-emerald-300 border-emerald-500/30'
-            }`}
-          >
-            🟢 Pasar a Sillón
-          </button>
-
-          {patient.flowStatus === 'en_sillon' && (
-            <select
-              value={patient.chairAssigned || 'Sillón 1'}
-              onChange={(e) => {
+            {/* En Espera */}
+            <button
+              type="button"
+              onClick={() => {
+                const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 onUpdatePatient({
                   ...patient,
-                  chairAssigned: e.target.value
+                  flowStatus: 'espera',
+                  checkInTime: patient.checkInTime || now,
+                  statusUpdatedAt: now
                 });
               }}
-              className="text-xs bg-slate-800 border border-teal-500/40 text-teal-200 rounded-xl px-2 py-1 font-bold outline-none cursor-pointer"
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                patient.flowStatus === 'espera' 
+                  ? 'bg-amber-500 text-slate-950 font-black shadow-xs ring-2 ring-amber-400/40' 
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-amber-50 dark:hover:bg-amber-950/30 border border-slate-200 dark:border-slate-700'
+              }`}
             >
-              <option value="Sillón 1">Sillón 1</option>
-              <option value="Sillón 2">Sillón 2</option>
-              <option value="Sillón 3">Sillón 3</option>
-              <option value="Gabinete Quirúrgico">Gabinete Quirúrgico</option>
-            </select>
-          )}
+              <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
+              En Espera
+            </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              onUpdatePatient({
-                ...patient,
-                flowStatus: 'atendido',
-                statusUpdatedAt: now
-              });
-            }}
-            className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-              patient.flowStatus === 'atendido' 
-                ? 'bg-sky-500 text-slate-950 font-black border-sky-400 shadow-sm' 
-                : 'bg-slate-800/80 hover:bg-slate-700 text-sky-300 border-sky-500/30'
-            }`}
-          >
-            🔵 Atendido / Salida
-          </button>
+            {/* En Sillón */}
+            <button
+              type="button"
+              onClick={() => {
+                const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                onUpdatePatient({
+                  ...patient,
+                  flowStatus: 'en_sillon',
+                  chairAssigned: patient.chairAssigned || 'Sillón 1',
+                  statusUpdatedAt: now
+                });
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                patient.flowStatus === 'en_sillon' 
+                  ? 'bg-emerald-500 text-slate-950 font-black shadow-xs ring-2 ring-emerald-400/40' 
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0 animate-pulse"></span>
+              En Sillón
+            </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              onUpdatePatient({
-                ...patient,
-                flowStatus: 'completado',
-                statusUpdatedAt: now
-              });
-            }}
-            className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-              patient.flowStatus === 'completado' 
-                ? 'bg-teal-500 text-slate-950 font-black border-teal-400 shadow-sm' 
-                : 'bg-slate-800/80 hover:bg-slate-700 text-teal-300 border-teal-500/30'
-            }`}
-          >
-            ✅ Concluido
-          </button>
-        </div>
-      </div>
+            {patient.flowStatus === 'en_sillon' && (
+              <select
+                value={patient.chairAssigned || 'Sillón 1'}
+                onChange={(e) => {
+                  onUpdatePatient({
+                    ...patient,
+                    chairAssigned: e.target.value
+                  });
+                }}
+                className="text-xs bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200 rounded-xl px-2 py-1.5 font-bold outline-none cursor-pointer"
+              >
+                <option value="Sillón 1">Sillón 1</option>
+                <option value="Sillón 2">Sillón 2</option>
+                <option value="Sillón 3">Sillón 3</option>
+                <option value="Gabinete Quirúrgico">Gabinete Quirúrgico</option>
+              </select>
+            )}
 
-      {/* Patient Demographic & Identification Ribbon */}
-      <div className="bg-slate-900/90 text-white px-5 py-3 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-teal-500/20 border border-teal-500/30 flex items-center justify-center font-display font-black text-teal-300 text-sm">
-            {patient.name.charAt(0)}
+            {/* Atendido */}
+            <button
+              type="button"
+              onClick={() => {
+                const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                onUpdatePatient({
+                  ...patient,
+                  flowStatus: 'atendido',
+                  statusUpdatedAt: now
+                });
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                patient.flowStatus === 'atendido' 
+                  ? 'bg-sky-500 text-slate-950 font-black shadow-xs ring-2 ring-sky-400/40' 
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-sky-50 dark:hover:bg-sky-950/30 border border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-sky-400 shrink-0"></span>
+              Atendido
+            </button>
+
+            {/* Concluido */}
+            <button
+              type="button"
+              onClick={() => {
+                const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                onUpdatePatient({
+                  ...patient,
+                  flowStatus: 'completado',
+                  statusUpdatedAt: now
+                });
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                patient.flowStatus === 'completado' 
+                  ? 'bg-teal-600 text-white font-bold shadow-xs ring-2 ring-teal-400/40' 
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-teal-50 dark:hover:bg-teal-950/30 border border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              <Check className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+              Concluido
+            </button>
           </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-base font-bold text-white tracking-tight">{patient.name}</h2>
-              {patient.rut ? (
-                <span className="px-2 py-0.5 rounded-md bg-teal-500/20 text-teal-300 border border-teal-500/40 text-xs font-mono font-bold">
-                  RUT: {patient.rut}
-                </span>
-              ) : (
-                <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-400 border border-slate-700 text-[11px] font-mono">
-                  Sin RUT
-                </span>
-              )}
-            </div>
-            <div className="text-xs text-slate-400 flex items-center gap-3 mt-0.5 flex-wrap font-medium">
-              <span className="font-mono">Expediente: #{patient.id.split('-')[1] || patient.id}</span>
-              {patient.birthdate && <span>🎂 {patient.birthdate}</span>}
-              {patient.phone && <span>📞 {patient.phone}</span>}
-              {patient.email && <span>✉️ {patient.email}</span>}
-            </div>
-          </div>
+
         </div>
       </div>
 
@@ -721,132 +708,174 @@ Acepto y entiendo los siguientes riesgos clínicos y advertencias fundamentales:
               <div className="lg:col-span-3 space-y-6">
 
                 {/* MATRIZ DE BIOSEGURIDAD Y ALERTAS ACTIVAS EN TIEMPO REAL */}
-                <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-teal-950 text-white rounded-2xl p-5 border border-slate-700/80 shadow-md relative overflow-hidden">
-                  <div className="flex items-center justify-between mb-3 border-b border-slate-700/60 pb-3">
-                    <div className="flex items-center gap-2">
-                      <div className="p-1.5 rounded-lg bg-teal-500/20 text-teal-300">
-                        <ShieldAlert className="w-5 h-5 text-teal-400" />
+                {(() => {
+                  const hasAlerts = Boolean(
+                    anamnesis.bifosfonatos ||
+                    anamnesis.anticoagulantes ||
+                    (anamnesis.presionSistolica && anamnesis.presionSistolica >= 140) ||
+                    (anamnesis.presionDiastolica && anamnesis.presionDiastolica >= 90) ||
+                    anamnesis.hta ||
+                    anamnesis.profilaxisAntibiotica ||
+                    anamnesis.embarazo ||
+                    (anamnesis.alergiaAnestesia && anamnesis.alergiaAnestesia !== 'Ninguna') ||
+                    anamnesis.alergiaLatex ||
+                    anamnesis.alergias ||
+                    anamnesis.biotipoPeriodontal === 'fino'
+                  );
+
+                  return (
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 md:p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs transition-colors">
+                      <div className="flex items-center justify-between mb-3.5 border-b border-slate-100 dark:border-slate-800 pb-3 flex-wrap gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-950/40 text-teal-600 dark:text-teal-300 border border-teal-200 dark:border-teal-800/50">
+                            <ShieldAlert className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                              Bioseguridad & Alertas Clínicas
+                              {hasAlerts ? (
+                                <span className="text-[11px] font-bold bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-700/60">
+                                  Precauciones Activas
+                                </span>
+                              ) : (
+                                <span className="text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-700/60">
+                                  Sin Riesgos Sistémicos
+                                </span>
+                              )}
+                            </h3>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                              Protocolos biológicos y pautas farmacológicas recomendadas para el sillón
+                            </p>
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="font-bold text-sm text-white flex items-center gap-2">
-                          Matriz de Bioseguridad & Protocolo de Tratamiento Seguro
-                          <span className="text-[10px] font-mono font-bold bg-teal-500/20 text-teal-300 px-2 py-0.5 rounded-full border border-teal-500/30">
-                            Multidisciplinar
-                          </span>
-                        </h3>
-                        <p className="text-[11px] text-slate-300">Verificación biológica automática de riesgos quirúrgicos y de sedación</p>
+
+                      {/* Dynamic Alert Chips */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                        {/* Alerta MRONJ / Bifosfonatos */}
+                        {anamnesis.bifosfonatos && (
+                          <div className="bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/50 p-3 rounded-xl flex items-start gap-2.5">
+                            <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                            <div>
+                              <div className="text-xs font-bold text-rose-900 dark:text-rose-200">
+                                🔴 Riesgo MRONJ (Osteonecrosis Maxilar)
+                              </div>
+                              <div className="text-[11px] text-rose-800/90 dark:text-rose-300/90 leading-tight mt-0.5">
+                                Terapia con Bifosfonatos ({anamnesis.viaBifosfonatos === 'intravenoso' ? 'Vía I.V. Alto Riesgo' : 'Vía Oral'}). Evitar exodoncias e implantes sin protocolo médico previo.
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Alerta Anticoagulación / INR */}
+                        {anamnesis.anticoagulantes && (
+                          <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 p-3 rounded-xl flex items-start gap-2.5">
+                            <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                            <div>
+                              <div className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                                🟠 Manejo Hemorrágico (INR: {anamnesis.valorINR || 'Sin registrar'})
+                              </div>
+                              <div className="text-[11px] text-amber-800/90 dark:text-amber-300/90 leading-tight mt-0.5">
+                                Tratamiento activo con {anamnesis.tipoAnticoagulante || 'Anticoagulante'}. Verificar INR &lt; 3.0 para raspado profundo o cirugías y disponer de hemostáticos locales.
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Alerta Presión Arterial / Vasoconstrictor */}
+                        {((anamnesis.presionSistolica && anamnesis.presionSistolica >= 140) || (anamnesis.presionDiastolica && anamnesis.presionDiastolica >= 90) || anamnesis.hta) && (
+                          <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 p-3 rounded-xl flex items-start gap-2.5">
+                            <HeartPulse className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                            <div>
+                              <div className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                                🟡 Hipertensión & Vasoconstrictor ({anamnesis.presionSistolica || 120}/{anamnesis.presionDiastolica || 80} mmHg)
+                              </div>
+                              <div className="text-[11px] text-amber-800/90 dark:text-amber-300/90 leading-tight mt-0.5">
+                                Limitar vasoconstrictor (máx. 2 carpules con Epinefrina 1:100.000) o emplear Mepivacaína al 3% sin vasoconstrictor si PA &gt; 160/100.
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Alerta Profilaxis Antibiótica */}
+                        {anamnesis.profilaxisAntibiotica && (
+                          <div className="bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800/50 p-3 rounded-xl flex items-start gap-2.5">
+                            <Info className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0 mt-0.5" />
+                            <div>
+                              <div className="text-xs font-bold text-sky-900 dark:text-sky-200">
+                                🔵 Profilaxis Antibiótica Requerida
+                              </div>
+                              <div className="text-[11px] text-sky-800/90 dark:text-sky-300/90 leading-tight mt-0.5">
+                                {anamnesis.razonProfilaxis || 'Prevención de Endocarditis'}. Amoxicilina 2g V.O. 1h antes del procedimiento (o Clindamicina 600mg).
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Alerta Embarazo */}
+                        {anamnesis.embarazo && (
+                          <div className="bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/50 p-3 rounded-xl flex items-start gap-2.5">
+                            <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-300 shrink-0 mt-0.5" />
+                            <div>
+                              <div className="text-xs font-bold text-purple-900 dark:text-purple-200">
+                                🤰 Embarazo ({anamnesis.trimestreEmbarazo ? `${anamnesis.trimestreEmbarazo} Trimestre` : '2do Trimestre óptimo'})
+                              </div>
+                              <div className="text-[11px] text-purple-800/90 dark:text-purple-300/90 leading-tight mt-0.5">
+                                Chaleco plomado con collarín tiroideo si se requieren Rx. Fármacos seguros: Paracetamol. Posición semi-reclinada.
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Alerta Alergias Anestesia / Látex */}
+                        {((anamnesis.alergiaAnestesia && anamnesis.alergiaAnestesia !== 'Ninguna') || anamnesis.alergiaLatex || anamnesis.alergias) && (
+                          <div className="bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/50 p-3 rounded-xl flex items-start gap-2.5">
+                            <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                            <div>
+                              <div className="text-xs font-bold text-rose-900 dark:text-rose-200">
+                                🚫 Alergias & Bioseguridad en Sillón
+                              </div>
+                              <div className="text-[11px] text-rose-800/90 dark:text-rose-300/90 leading-tight mt-0.5">
+                                {anamnesis.alergiaAnestesia && anamnesis.alergiaAnestesia !== 'Ninguna' ? `Anestesia: ${anamnesis.alergiaAnestesia}. ` : ''}
+                                {anamnesis.alergiaLatex ? 'LÁTEX: Guantes de Nitrilo obligatorio. ' : ''}
+                                {anamnesis.alergias}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Biotipo Periodontal Fino */}
+                        {anamnesis.biotipoPeriodontal === 'fino' && (
+                          <div className="bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800/50 p-3 rounded-xl flex items-start gap-2.5">
+                            <ShieldAlert className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0 mt-0.5" />
+                            <div>
+                              <div className="text-xs font-bold text-teal-900 dark:text-teal-200">
+                                📐 Biotipo Periodontal Fino
+                              </div>
+                              <div className="text-[11px] text-teal-800/90 dark:text-teal-300/90 leading-tight mt-0.5">
+                                Alta vulnerabilidad a recesión gingival y reabsorción ósea marginal. Procedimientos quirúrgicos atraumáticos.
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {!hasAlerts && (
+                          <div className="col-span-1 md:col-span-2 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 p-3 rounded-xl flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                              <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                                Paciente Apto para Procedimientos Estándar (Sin alertas críticas sistémicas)
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-mono font-bold">
+                              Signos Estables
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
-
-                  {/* Dynamic Alert Chips */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                    {/* Alerta MRONJ / Bifosfonatos */}
-                    {anamnesis.bifosfonatos ? (
-                      <div className="bg-rose-950/80 border border-rose-500/40 p-3 rounded-xl flex items-start gap-2.5">
-                        <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="text-xs font-bold text-rose-200">🔴 RIESGO MRONJ (OSTEONECROSIS MAXILAR)</div>
-                          <div className="text-[10px] text-rose-300/90 leading-tight mt-0.5">
-                            Paciente en terapia con Bifosfonatos/Denosumab ({anamnesis.viaBifosfonatos === 'intravenoso' ? 'VÍA INTRAVENOSA - ALTO RIESGO' : 'Vía Oral'}). Evitar exodoncias e implantes sin protocolo de suspensión médica previa.
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {/* Alerta Anticoagulación / INR */}
-                    {anamnesis.anticoagulantes ? (
-                      <div className="bg-amber-950/80 border border-amber-500/40 p-3 rounded-xl flex items-start gap-2.5">
-                        <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="text-xs font-bold text-amber-200">🟠 ALERTA HEMORRÁGICA (INR: {anamnesis.valorINR || 'Sin registrar'})</div>
-                          <div className="text-[10px] text-amber-300/90 leading-tight mt-0.5">
-                            Tratamiento activo con {anamnesis.tipoAnticoagulante || 'Anticoagulante'}. Verificar INR &lt; 3.0 antes de exodoncias o raspado profundo. Preparar hemostáticos locales.
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {/* Alerta Presión Arterial / Vasoconstrictor */}
-                    {(anamnesis.presionSistolica && anamnesis.presionSistolica >= 140) || (anamnesis.presionDiastolica && anamnesis.presionDiastolica >= 90) || anamnesis.hta ? (
-                      <div className="bg-amber-900/60 border border-amber-500/30 p-3 rounded-xl flex items-start gap-2.5">
-                        <HeartPulse className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="text-xs font-bold text-amber-200">
-                            🟡 HIPERTENSIÓN Y ANESTESIA ({anamnesis.presionSistolica || 120}/{anamnesis.presionDiastolica || 80} mmHg)
-                          </div>
-                          <div className="text-[10px] text-amber-300/90 leading-tight mt-0.5">
-                            Limitar vasoconstrictor (máx. 2 carpules con Epinefrina 1:100.000) o utilizar Mepivacaína al 3% sin vasoconstrictor si PA &gt; 160/100.
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {/* Alerta Profilaxis Antibiótica */}
-                    {anamnesis.profilaxisAntibiotica ? (
-                      <div className="bg-sky-950/80 border border-sky-500/40 p-3 rounded-xl flex items-start gap-2.5">
-                        <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="text-xs font-bold text-sky-200">🔵 PROFILAXIS ANTIBIÓTICA REQUERIDA</div>
-                          <div className="text-[10px] text-sky-300/90 leading-tight mt-0.5">
-                            {anamnesis.razonProfilaxis || 'Prevención de Endocarditis Infecciosa'}. Indicar Amoxicilina 2g V.O. 1 hora antes (o Clindamicina 600mg).
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {/* Alerta Embarazo */}
-                    {anamnesis.embarazo ? (
-                      <div className="bg-purple-950/80 border border-purple-500/40 p-3 rounded-xl flex items-start gap-2.5">
-                        <Sparkles className="w-4 h-4 text-purple-300 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="text-xs font-bold text-purple-200">🤰 EMBARAZO (Trimestre: {anamnesis.trimestreEmbarazo || '2do óptimo'})</div>
-                          <div className="text-[10px] text-purple-300/90 leading-tight mt-0.5">
-                            Usar chaleco plomado con collarín tiroideo si se requieren Rx. Fármacos seguros: Paracetamol y Penicilinas. Posición semi-reclinada.
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {/* Alerta Alergias Anestesia / Látex */}
-                    {(anamnesis.alergiaAnestesia && anamnesis.alergiaAnestesia !== 'Ninguna') || anamnesis.alergiaLatex || anamnesis.alergias ? (
-                      <div className="bg-red-950/80 border border-red-500/40 p-3 rounded-xl flex items-start gap-2.5">
-                        <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="text-xs font-bold text-red-200">🚫 ALERGIAS Y BIOSEGURIDAD EN SILLÓN</div>
-                          <div className="text-[10px] text-red-300/90 leading-tight mt-0.5">
-                            {anamnesis.alergiaAnestesia && anamnesis.alergiaAnestesia !== 'Ninguna' ? `Anestésicos: ${anamnesis.alergiaAnestesia}. ` : ''}
-                            {anamnesis.alergiaLatex ? 'LÁTEX: Usar exclusivamente guantes de Nitrilo. ' : ''}
-                            {anamnesis.alergias}
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {/* Biotipo Periodontal Fino */}
-                    {anamnesis.biotipoPeriodontal === 'fino' ? (
-                      <div className="bg-teal-950/80 border border-teal-500/40 p-3 rounded-xl flex items-start gap-2.5">
-                        <ShieldAlert className="w-4 h-4 text-teal-400 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="text-xs font-bold text-teal-200">📐 BIOTIPO PERIODONTAL FINO (RIESGO TISULAR)</div>
-                          <div className="text-[10px] text-teal-300/90 leading-tight mt-0.5">
-                            Alta vulnerabilidad a recesión gingival y reabsorción del hueso del margen vestibular. Evaluar injerto de tejido conectivo en cirugías/implantes.
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {!anamnesis.bifosfonatos && !anamnesis.anticoagulantes && !anamnesis.profilaxisAntibiotica && !anamnesis.embarazo && (!anamnesis.alergiaAnestesia || anamnesis.alergiaAnestesia === 'Ninguna') && !anamnesis.alergiaLatex && (!anamnesis.presionSistolica || anamnesis.presionSistolica < 140) && (
-                      <div className="col-span-1 md:col-span-2 bg-emerald-950/40 border border-emerald-500/30 p-3 rounded-xl flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Check className="w-4 h-4 text-emerald-400" />
-                          <span className="text-xs font-bold text-emerald-300">Paciente Apto para Procedimientos Estándar (Sin alertas críticas sistémicas)</span>
-                        </div>
-                        <span className="text-[10px] text-emerald-400/80 font-mono">Signos Vitales Estables</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                  );
+                })()}
 
               {/* SECCION 1: MOTIVO DE CONSULTA Y DOLOR */}
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">

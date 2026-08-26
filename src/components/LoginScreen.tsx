@@ -23,6 +23,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { ClinicalUser, Patient } from "../types";
 import { auth, db, cleanForFirestore } from "../firebase";
 import { doc, setDoc } from "firebase/firestore";
+import { encryptPatientForFirestore } from "../utils/ephiEncryption";
 import { createEmptyOdontogram, createEmptyPeriodontogram } from "../initialData";
 import CaptchaComponent from "./CaptchaComponent";
 import TwoFactorAuthStep from "./TwoFactorAuthStep";
@@ -320,7 +321,9 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
             };
             currentPatients = [newPatRecord, ...currentPatients];
             localStorage.setItem("perioPatients_data", JSON.stringify(currentPatients));
-            setDoc(doc(db, "patients", newPatRecord.id), cleanForFirestore(newPatRecord)).catch(() => {});
+            encryptPatientForFirestore(newPatRecord)
+              .then(encPayload => setDoc(doc(db, "patients", newPatRecord.id), cleanForFirestore(encPayload)))
+              .catch(() => {});
           }
         } catch (e) {
           console.warn("Could not sync new patient record:", e);

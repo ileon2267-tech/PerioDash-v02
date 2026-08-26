@@ -186,6 +186,19 @@ function SpotlightComponent({ patients, onSelectPatient, onNavigate }: Spotlight
                       </div>
                     </button>
                   ) : null}
+
+                  {query.toLowerCase().includes("int") || query.toLowerCase().includes("fire") || query.toLowerCase().includes("sql") || query.toLowerCase().includes("nub") || query.toLowerCase().includes("cloud") ? (
+                    <button 
+                      onClick={() => handleAction("ajustes")}
+                      className="w-full flex items-center gap-3 p-3 hover:bg-teal-50/50 dark:hover:bg-teal-950/20 rounded-xl transition-all text-left"
+                    >
+                      <Settings className="w-5 h-5 text-teal-600 dark:text-teal-400" />
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">Centro de Integraciones & Cloud</div>
+                        <div className="text-[10px] text-teal-600 dark:text-teal-400">Ver estado de Firebase Firestore, Cloud SQL y Google Calendar</div>
+                      </div>
+                    </button>
+                  ) : null}
                 </>
               )}
             </div>

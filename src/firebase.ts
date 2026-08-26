@@ -1,34 +1,42 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { 
+  initializeFirestore, 
+  getFirestore, 
+  persistentLocalCache, 
+  persistentMultipleTabManager 
+} from 'firebase/firestore';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider, type AppCheck } from 'firebase/app-check';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Inicialización controlada previniendo inicialización múltiple
 export const app: FirebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firebase App Check using ReCaptchaEnterpriseProvider safely
+// Initialize Firebase App Check using ReCaptchaEnterpriseProvider only when valid key is provided
 export let appCheck: AppCheck | null = null;
 
-const RECAPTCHA_ENTERPRISE_SITE_KEY = '6LfFJ5ktAAAAAGNZZbNOs9gkNVdv6W3vctQ58uAw';
+const siteKey = (firebaseConfig as any).recaptchaSiteKey || '';
 
 /**
  * Inicialización segura y encapsulada de Firebase App Check.
- * Verifica si getApps().length > 0 y si la app activa está lista antes de aplicar App Check.
+ * Solo se activa si existe una clave de sitio de reCAPTCHA configurada válidamente.
  */
 export function initAppCheckSafely(): AppCheck | null {
   if (appCheck) return appCheck;
   if (typeof window === 'undefined') return null;
 
+  // Verificar que exista una clave válida configurada
+  if (!siteKey || siteKey.trim() === '') {
+    return null;
+  }
+
   // Verificar que exista al menos una app de Firebase inicializada en el contexto
   if (getApps().length === 0) {
-    console.warn('⚠️ [App Check]: No se puede inicializar App Check porque no hay aplicaciones de Firebase activas (getApps().length === 0).');
     return null;
   }
 
   const targetApp = app || getApp();
   if (!targetApp) {
-    console.warn('⚠️ [App Check]: No se pudo obtener la instancia activa de Firebase App.');
     return null;
   }
 
@@ -39,53 +47,40 @@ export function initAppCheckSafely(): AppCheck | null {
     if (isDev) {
       const debugToken = (import.meta as any).env?.VITE_APPCHECK_DEBUG_TOKEN;
       (self as any).FIREBASE_APPCHECK_DEBUG_TOKEN = debugToken || true;
-      console.info('🛡️ Firebase App Check: Token de depuración habilitado en entorno de desarrollo.');
     }
 
     if (typeof initializeAppCheck === 'function' && typeof ReCaptchaEnterpriseProvider === 'function') {
       appCheck = initializeAppCheck(targetApp, {
-        provider: new ReCaptchaEnterpriseProvider(RECAPTCHA_ENTERPRISE_SITE_KEY),
+        provider: new ReCaptchaEnterpriseProvider(siteKey),
         isTokenAutoRefreshEnabled: true,
       });
-
-      if (isDev) {
-        if (appCheck) {
-          console.log(
-            '%c🛡️ [App Check Dev]: Inicializado correctamente con ReCaptchaEnterpriseProvider.',
-            'background: #0f766e; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
-            {
-              siteKey: `${RECAPTCHA_ENTERPRISE_SITE_KEY.slice(0, 10)}...`,
-              autoRefresh: true,
-              debugTokenActive: !!(self as any).FIREBASE_APPCHECK_DEBUG_TOKEN,
-            }
-          );
-        } else {
-          console.warn('⚠️ [App Check Dev]: initializeAppCheck retornó null o no se pudo instanciar.');
-        }
-      }
-    } else {
-      console.warn('⚠️ [App Check]: El SDK de App Check o el proveedor ReCaptchaEnterprise no están disponibles en este entorno.');
     }
   } catch (err) {
-    const isDev = (import.meta as any).env?.DEV || process.env.NODE_ENV !== 'production';
-    if (isDev) {
-      console.error('❌ [App Check Dev Error]: Falló la inicialización de Firebase App Check:', err);
-    } else {
-      console.warn('Aviso en inicialización de Firebase App Check:', err);
-    }
+    console.warn('Aviso en inicialización de Firebase App Check:', err);
   }
 
   return appCheck;
 }
 
-// Ejecutar inicialización segura si estamos en el cliente y la app está lista
-if (typeof window !== 'undefined' && app) {
+// Ejecutar inicialización segura si estamos en el cliente y la app tiene clave válida
+if (typeof window !== 'undefined' && siteKey && siteKey.trim() !== '') {
   initAppCheckSafely();
 }
 
-export const db = (firebaseConfig as any).firestoreDatabaseId 
-  ? getFirestore(app, (firebaseConfig as any).firestoreDatabaseId)
-  : getFirestore(app); /* CRITICAL: The app will break without this line */
+const firestoreDbId = (firebaseConfig as any).firestoreDatabaseId;
+
+export const db = (() => {
+  try {
+    return initializeFirestore(app, {
+      experimentalAutoDetectLongPolling: true,
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager()
+      })
+    }, firestoreDbId || undefined);
+  } catch {
+    return firestoreDbId ? getFirestore(app, firestoreDbId) : getFirestore(app);
+  }
+})(); /* CRITICAL: The app will break without proper firestore initialization */
 
 export const auth = getAuth(app);
 

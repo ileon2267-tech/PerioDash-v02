@@ -3,10 +3,10 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { installConsoleSecurityShield } from './utils/securityShield';
+import { initClientDefenseShield } from './utils/securityShield';
 
-// Install PII/PHI Console Sanitizer
-installConsoleSecurityShield();
+// Install PII/PHI Console Sanitizer & Client Anti-Tamper Shield
+initClientDefenseShield();
 
 // Protect against external cross-origin iframe Script Errors
 if (typeof window !== 'undefined') {

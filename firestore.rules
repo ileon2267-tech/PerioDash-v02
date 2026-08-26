@@ -144,9 +144,9 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Health-Check endpoint (authenticated only)
+    // Health-Check endpoint (safe ping)
     match /test/{testId} {
-      allow read: if isSignedIn() && isValidId(testId);
+      allow read: if isValidId(testId);
       allow write: if false;
     }
 
