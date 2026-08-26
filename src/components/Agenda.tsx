@@ -14,6 +14,11 @@ import {
   GoogleCalendarEvent 
 } from "../services/googleCalendar";
 import { ConfirmCalendarActionModal, GoogleImportModal } from "./GoogleCalendarSyncModal";
+import WhatsAppReminderModal from "./WhatsAppReminderModal";
+import WhatsAppBatchModal from "./WhatsAppBatchModal";
+import { twilioService } from "../services/twilioService";
+import { createFallbackPatient } from "../services/whatsappReminderService";
+import { maskPII } from "../utils/hipaaAudit";
 import { 
   Calendar, 
   Clock, 
@@ -40,7 +45,10 @@ import {
   RefreshCw,
   ExternalLink,
   ShieldCheck,
-  CheckCircle2
+  CheckCircle2,
+  Smartphone,
+  Send,
+  Zap
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -118,6 +126,10 @@ interface AgendaProps {
   onUpdateStatus: (id: string, status: Appointment["status"]) => void;
   onDeleteAppointment: (id: string) => void;
   onUpdateAppointment?: (updatedApp: Appointment) => void;
+  clinicName?: string;
+  doctorName?: string;
+  onUpdatePatient?: (updatedPatient: Patient) => void;
+  privacyMode?: boolean;
 }
 
 // Helper for dynamic real current date
@@ -136,12 +148,25 @@ export default function Agenda({
   onUpdateStatus,
   onDeleteAppointment,
   onUpdateAppointment,
+  clinicName = "PerioClinic Pro",
+  doctorName = "Dr. Especialista Titular",
+  onUpdatePatient,
+  privacyMode = false
 }: AgendaProps) {
   // Always initialize with dynamic current real date
   const [selectedDate, setSelectedDate] = useState(getTodayStr);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"All" | "Pending" | "Confirmed" | "Completed" | "GoogleSynced">("All");
   const [agendaView, setAgendaView] = useState<"list" | "grid">("list");
+
+  // WhatsApp Reminder Modals State
+  const [whatsappModalState, setWhatsappModalState] = useState<{
+    isOpen: boolean;
+    patient: Patient | null;
+    appointment?: Appointment;
+  }>({ isOpen: false, patient: null });
+
+  const [showBatchWhatsAppModal, setShowBatchWhatsAppModal] = useState(false);
 
   // Form state
   const [showForm, setShowForm] = useState(false);
@@ -689,22 +714,16 @@ export default function Agenda({
     setFormTreatment("");
   };
 
-  // Safe WhatsApp Link Generator
+  // WhatsApp Smart Modal Launcher
   const handleSendWhatsApp = (app: Appointment) => {
-    const matchedPatient = patients.find(p => p.id === app.patientId);
-    if (!matchedPatient || !matchedPatient.phone) return;
+    const matchedPatient = patients.find(p => p.id === app.patientId) || 
+      createFallbackPatient(app.patientId || `pat-${app.id}`, app.patientName, "");
 
-    // Clean phone number
-    const tel = matchedPatient.phone.replace(/[\s+()-]/g, "");
-    const formattedDate = new Date(app.date + "T00:00:00").toLocaleDateString("es-ES", {
-      weekday: "long",
-      day: "numeric",
-      month: "long"
+    setWhatsappModalState({
+      isOpen: true,
+      patient: matchedPatient,
+      appointment: app
     });
-
-    const msg = `Hola ${matchedPatient.name}, te recordamos tu cita odontológica para el día *${formattedDate}* a las *${app.time} hrs*.\n\n📍 *Tratamiento:* ${app.treatment}\n\nPor favor, responde a este mensaje para confirmar tu asistencia. ¡Que tengas un excelente día!`;
-    const url = `https://wa.me/${tel}?text=${encodeURIComponent(msg)}`;
-    window.open(url, "_blank");
   };
 
   // Filter appointments for active date and filters
@@ -783,6 +802,17 @@ export default function Agenda({
               className="pl-9 pr-4 py-2.5 w-56 sm:w-64 text-xs font-medium rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 outline-none dark:text-white transition-all focus:border-teal-500/50 focus:ring-2 focus:ring-teal-500/10 shadow-sm"
             />
           </div>
+
+          {/* WhatsApp Batch Reminders Dispatcher */}
+          <button
+            type="button"
+            onClick={() => setShowBatchWhatsAppModal(true)}
+            className="px-4 py-2.5 text-xs font-bold leading-none text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-500/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 rounded-xl flex items-center gap-2 cursor-pointer shadow-xs transition-all shrink-0"
+            title="Enviar recordatorios automáticos por WhatsApp (Twilio API / wa.me)"
+          >
+            <Smartphone className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span>Recordatorios WhatsApp ({appointments.filter(a => a.status !== 'Cancelled').length})</span>
+          </button>
 
           {/* Google Calendar Quick Sync/Connect & Export Actions */}
           {!isGoogleConnected ? (
@@ -1212,11 +1242,11 @@ export default function Agenda({
                             <div className="space-y-1">
                               <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
                                 <span className="font-bold text-slate-900 dark:text-white text-base leading-none">
-                                  {app.patientName}
+                                  {privacyMode ? maskPII(app.patientName, "name") : app.patientName}
                                 </span>
                                 {matchedPatient?.phone && (
                                   <span className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md flex items-center gap-1 w-fit">
-                                    <Phone className="w-3 h-3" /> {matchedPatient.phone}
+                                    <Phone className="w-3 h-3" /> {privacyMode ? maskPII(matchedPatient.phone, "phone") : matchedPatient.phone}
                                   </span>
                                 )}
                               </div>
@@ -1307,6 +1337,17 @@ export default function Agenda({
                             </div>
 
                             <div className="h-6 w-px bg-slate-200 dark:bg-slate-700" />
+
+                            {/* Twilio WhatsApp Automated Reminder Action Button */}
+                            <button
+                              type="button"
+                              onClick={() => handleSendWhatsApp(app)}
+                              className="p-2 px-2.5 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 border border-emerald-500/30 hover:border-emerald-500/60 text-emerald-700 dark:text-emerald-300 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 text-[10px] font-bold shadow-xs group/wa"
+                              title="Enviar recordatorio automático por WhatsApp al paciente (Twilio API / wa.me)"
+                            >
+                              <Smartphone className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 group-hover/wa:scale-110 transition-transform" />
+                              <span className="hidden sm:inline">WhatsApp</span>
+                            </button>
 
                             {/* Google Calendar Quick Sync / Status Button */}
                             <div className="flex items-center">
@@ -1412,7 +1453,9 @@ export default function Agenda({
                                       }`} />
                                       <div className="pl-2 flex-1" onClick={() => handleOpenEditForm(matchedApp)}>
                                         <div className="flex items-center justify-between gap-1">
-                                          <span className="text-[11px] font-black text-slate-800 dark:text-slate-100 truncate">{matchedApp.patientName}</span>
+                                          <span className="text-[11px] font-black text-slate-800 dark:text-slate-100 truncate">
+                                            {privacyMode ? maskPII(matchedApp.patientName, "name") : matchedApp.patientName}
+                                          </span>
                                           <div className="flex items-center gap-1 shrink-0">
                                             {/* Google Calendar Visual Indicator */}
                                             {matchedApp.googleCalendarEventId ? (
@@ -1488,13 +1531,25 @@ export default function Agenda({
                                           )}
                                         </div>
 
-                                        <button
-                                          onClick={(e) => { e.stopPropagation(); onDeleteAppointment(matchedApp.id); }}
-                                          className="p-1 text-slate-300 hover:text-red-500 transition-colors cursor-pointer border-0 bg-transparent flex items-center justify-center rounded-md"
-                                          title="Eliminar"
-                                        >
-                                          <Trash2 className="w-3 h-3" />
-                                        </button>
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            type="button"
+                                            onClick={(e) => { e.stopPropagation(); handleSendWhatsApp(matchedApp); }}
+                                            className="px-1.5 py-0.5 bg-emerald-500/10 hover:bg-emerald-500 hover:text-white text-emerald-700 dark:text-emerald-300 text-[8px] font-bold rounded-md cursor-pointer border border-emerald-500/30 transition-all flex items-center gap-0.5"
+                                            title="Enviar recordatorio WhatsApp (Twilio)"
+                                          >
+                                            <Smartphone className="w-2.5 h-2.5" />
+                                            <span>WA</span>
+                                          </button>
+
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); onDeleteAppointment(matchedApp.id); }}
+                                            className="p-1 text-slate-300 hover:text-red-500 transition-colors cursor-pointer border-0 bg-transparent flex items-center justify-center rounded-md"
+                                            title="Eliminar"
+                                          >
+                                            <Trash2 className="w-3 h-3" />
+                                          </button>
+                                        </div>
                                       </div>
                                     </div>
                                   ) : (
@@ -1775,6 +1830,40 @@ export default function Agenda({
         isLoading={isCalendarLoading}
         onRefresh={handleOpenImportModal}
       />
+
+      {/* WhatsApp Individual Reminder Modal */}
+      {whatsappModalState.isOpen && whatsappModalState.patient && (
+        <WhatsAppReminderModal
+          isOpen={whatsappModalState.isOpen}
+          onClose={() => setWhatsappModalState({ isOpen: false, patient: null })}
+          patient={whatsappModalState.patient}
+          appointment={whatsappModalState.appointment}
+          clinicName={clinicName}
+          doctorName={doctorName}
+          onCommunicationSent={(_newComm, updatedPat) => {
+            if (onUpdatePatient) {
+              onUpdatePatient(updatedPat);
+            }
+          }}
+        />
+      )}
+
+      {/* WhatsApp Batch Reminders Modal */}
+      {showBatchWhatsAppModal && (
+        <WhatsAppBatchModal
+          isOpen={showBatchWhatsAppModal}
+          onClose={() => setShowBatchWhatsAppModal(false)}
+          appointments={appointments}
+          patients={patients}
+          clinicName={clinicName}
+          doctorName={doctorName}
+          onCommunicationsBatchSent={(updatedList) => {
+            if (onUpdatePatient) {
+              updatedList.forEach(p => onUpdatePatient(p));
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

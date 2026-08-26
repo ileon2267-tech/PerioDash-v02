@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Search, ChevronRight, User, Calendar, Settings, X } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Patient } from "../types";
@@ -49,12 +49,28 @@ function SpotlightComponent({ patients, onSelectPatient, onNavigate }: Spotlight
     }
   }, [isOpen]);
 
-  const filteredPatients = query ? patients.filter((p) => 
-    p.name.toLowerCase().includes(query.toLowerCase()) || 
-    p.phone.includes(query) ||
-    p.id.toLowerCase().includes(query.toLowerCase()) ||
-    matchPatientByRut(p.rut || p.dni, query)
-  ) : [];
+  const filteredPatients = useMemo(() => {
+    if (!query) return [];
+    const q = query.toLowerCase().trim();
+    const seen = new Set<string>();
+    const results: Patient[] = [];
+
+    for (let i = 0; i < patients.length; i++) {
+      const p = patients[i];
+      if (!p || !p.id || seen.has(p.id)) continue;
+      const match =
+        p.name.toLowerCase().includes(q) ||
+        p.phone.includes(q) ||
+        p.id.toLowerCase().includes(q) ||
+        matchPatientByRut(p.rut || p.dni, query);
+
+      if (match) {
+        seen.add(p.id);
+        results.push(p);
+      }
+    }
+    return results;
+  }, [patients, query]);
 
   const handleSelectPatient = (id: string) => {
     onSelectPatient(id);

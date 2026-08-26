@@ -97,8 +97,18 @@ function PatientDirectoryComponent({
   // Filtered list - Support search by Name, Email, Phone, ID, and RUT (with and without format)
   const filteredPatients = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    if (!q) return patients;
-    return patients.filter(
+    const seen = new Set<string>();
+    const base: Patient[] = [];
+
+    for (let i = 0; i < patients.length; i++) {
+      const p = patients[i];
+      if (!p || !p.id || seen.has(p.id)) continue;
+      seen.add(p.id);
+      base.push(p);
+    }
+
+    if (!q) return base;
+    return base.filter(
       (p) =>
         p.name.toLowerCase().includes(q) ||
         p.email.toLowerCase().includes(q) ||

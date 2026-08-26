@@ -5,7 +5,7 @@ import { collection, doc, setDoc } from "firebase/firestore";
 const AUDIT_STORAGE_KEY = "perio_hipaa_audit_trail";
 
 // Masking Utilities for Minimum Necessary Rule (HIPAA Privacy Rule)
-export function maskPII(value: string | undefined | null, type: "name" | "rut" | "phone" | "email"): string {
+export function maskPII(value: string | undefined | null, type: "name" | "rut" | "dni" | "document" | "phone" | "email"): string {
   if (!value) return "---";
   const str = String(value).trim();
   if (!str) return "---";
@@ -20,7 +20,9 @@ export function maskPII(value: string | undefined | null, type: "name" | "rut" |
         })
         .join(" ");
     }
-    case "rut": {
+    case "rut":
+    case "dni":
+    case "document": {
       // E.g. 18.234.567-8 -> 18.***.***-8
       if (str.length < 5) return "**-***";
       return str.slice(0, 3) + "***.***" + str.slice(-2);

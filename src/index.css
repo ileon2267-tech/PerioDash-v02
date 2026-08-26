@@ -14,64 +14,34 @@
   --color-brand-navy: #0f172a;
 }
 
-/* Animations */
-@keyframes neon-flow {
-  0% { background-position: 0% 50%; }
-  100% { background-position: 200% 50%; }
-}
-
-@keyframes neon-pulse {
+/* Refined Clinical Aesthetics - Cosmic Slate Medical Palette */
+@keyframes clinical-pulse {
   0%, 100% {
-    opacity: 0.85;
+    opacity: 0.9;
   }
   50% {
     opacity: 1;
   }
 }
 
-.neon-rainbow-bg {
-  background: linear-gradient(
-    90deg,
-    #0d9488, 
-    #06b6d4, 
-    #10b981,
-    #0284c7, 
-    #0d9488 
-  );
-  background-size: 200% auto;
-  will-change: background-position;
-  animation: neon-flow 8s linear infinite;
+@keyframes clinical-aura {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
 }
 
-.neon-intense-glow {
-  animation: neon-pulse 3s ease-in-out infinite;
-}
-
-.neon-box-pulse {
-  box-shadow: 0 0 12px rgba(20, 184, 166, 0.2);
-}
-
-@keyframes neon-box-pulse-anim {
-  0% {
-    box-shadow: 0 0 8px rgba(0, 255, 204, 0.2), 0 0 15px rgba(162, 0, 255, 0.1);
-  }
-  100% {
-    box-shadow: 0 0 18px rgba(0, 255, 204, 0.45), 0 0 35px rgba(255, 0, 170, 0.25);
-  }
-}
-
-.neon-text-rainbow {
+.clinical-gradient-bg {
   background: linear-gradient(
     135deg,
-    #00ffcc 10%, 
-    #00bfff 35%, 
-    #ff00aa 70%,
-    #a200ff 100%
+    #0f766e 0%, 
+    #0d9488 50%, 
+    #0891b2 100%
   );
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
+  background-size: 200% auto;
+  animation: clinical-aura 10s ease infinite;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Utility to support iOS safe areas on bottom tabs */
@@ -81,19 +51,44 @@
 
 /* Base style resets */
 body {
-  background-color: #f1f5f9;
-  color: #020617;
+  background-color: #f8fafc;
+  color: #0f172a;
   font-family: var(--font-sans);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.012em;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  scroll-behavior: smooth;
+  touch-action: manipulation;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* GPU Compositing for Silky 60fps Microinteractions */
+.gpu-layer {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+  will-change: transform, opacity;
+}
+
+/* Snappy Touch & Click Response */
+button, a, [role="button"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .dark {
-  background-color: #040814;
-  color: #f1f5f9;
+  background-color: #090d16;
+  color: #f8fafc;
 }
 
 /* ==========================================================================

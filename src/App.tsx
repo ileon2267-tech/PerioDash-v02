@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense, lazy } from "react";
-import { Patient, Appointment, ClinicalUser } from "./types";
+import { Patient, Appointment, ClinicalUser, PeriodontogramVisit } from "./types";
 import { 
   INITIAL_PATIENTS, 
   INITIAL_APPOINTMENTS, 
@@ -7,6 +7,7 @@ import {
   createEmptyPeriodontogram 
 } from "./initialData";
 import { formatRut } from "./utils/rutUtils";
+import { deduplicatePatients, deduplicateAppointments, generateUniqueId } from "./utils/dataUtils";
 import { db, handleFirestoreError, OperationType, auth, cleanForFirestore } from "./firebase";
 import { signInAnonymously } from "firebase/auth";
 import { collection, doc, setDoc, getDocs, deleteDoc, getDocFromServer, onSnapshot } from "firebase/firestore";
@@ -29,6 +30,7 @@ import ExternalPatientPortal from "./components/ExternalPatientPortal";
 import { ClinicalFlowTracker } from "./components/ClinicalFlowTracker";
 import HipaaInactivityLock from "./components/HipaaInactivityLock";
 import HipaaComplianceCenter from "./components/HipaaComplianceCenter";
+import SecurityHardeningBanner from "./components/SecurityHardeningBanner";
 
 // Secondary & Auxiliary Views (Code-Split / Lazy Load for Ultra-Fast App Startup & Low Memory)
 const Agenda = lazy(() => import("./components/Agenda"));
@@ -50,6 +52,9 @@ const InteractiveHelpPanel = lazy(() => import("./components/InteractiveHelpPane
 const KeyboardShortcutsModal = lazy(() => import("./components/KeyboardShortcutsModal"));
 const PatientDirectory = lazy(() => import("./components/PatientDirectory"));
 const DataBackupExport = lazy(() => import("./components/DataBackupExport"));
+const PrescriptionAndReferralModal = lazy(() => import("./components/PrescriptionAndReferralModal"));
+const PeriodontogramComparisonModal = lazy(() => import("./components/PeriodontogramComparisonModal"));
+const KioskModeModal = lazy(() => import("./components/KioskModeModal"));
 
 // Ultra-lightweight Clinical Suspense Skeleton
 function ClinicalViewSkeleton() {
@@ -111,7 +116,12 @@ import {
   Eye,
   EyeOff,
   Lock,
-  ShieldAlert
+  ShieldAlert,
+  Pill,
+  History,
+  Tablet,
+  QrCode,
+  FileSignature
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -242,12 +252,28 @@ export default function App() {
   // Client and Clinical records states
   const [patients, setPatients] = useState<Patient[]>(() => {
     const saved = localStorage.getItem("perioPatients");
-    return saved ? JSON.parse(saved) : INITIAL_PATIENTS;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return deduplicatePatients(parsed);
+      } catch (e) {
+        return INITIAL_PATIENTS;
+      }
+    }
+    return INITIAL_PATIENTS;
   });
 
   const [appointments, setAppointments] = useState<Appointment[]>(() => {
     const saved = localStorage.getItem("perioAppointments");
-    return saved ? JSON.parse(saved) : INITIAL_APPOINTMENTS;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return deduplicateAppointments(parsed);
+      } catch (e) {
+        return INITIAL_APPOINTMENTS;
+      }
+    }
+    return INITIAL_APPOINTMENTS;
   });
 
   const [activePatientId, setActivePatientId] = useState<string>(() => {
@@ -258,6 +284,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("dashboard");
   const [clinicalSubView, setClinicalSubView] = useState<"ficha" | "odontograma" | "periodontograma" | "pra" | "oleary" | "xrays" | "soap" | "presupuesto" | "especialidad">("ficha");
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showPrescriptionModal, setShowPrescriptionModal] = useState(false);
+  const [showPeriodontoComparison, setShowPeriodontoComparison] = useState(false);
+  const [showKioskModal, setShowKioskModal] = useState(false);
   const [deletingPatientId, setDeletingPatientId] = useState<string | null>(null);
 
   // Doctor's custom metadata states
@@ -476,10 +505,11 @@ export default function App() {
           remotePatients.push(docSnap.data() as Patient);
         });
 
-        if (remotePatients.length > 0) {
+        const cleanPatients = deduplicatePatients(remotePatients);
+        if (cleanPatients.length > 0) {
           isIncomingRemoteUpdateRef.current = true;
-          setPatients(remotePatients);
-          prevPatientsRef.current = remotePatients;
+          setPatients(cleanPatients);
+          prevPatientsRef.current = cleanPatients;
           setLastSyncedTime(new Date());
           setFirebaseSyncError(null);
           setTimeout(() => {
@@ -521,10 +551,11 @@ export default function App() {
           remoteAppointments.push(docSnap.data() as Appointment);
         });
 
-        if (remoteAppointments.length > 0) {
+        const cleanAppointments = deduplicateAppointments(remoteAppointments);
+        if (cleanAppointments.length > 0) {
           isIncomingRemoteUpdateRef.current = true;
-          setAppointments(remoteAppointments);
-          prevAppointmentsRef.current = remoteAppointments;
+          setAppointments(cleanAppointments);
+          prevAppointmentsRef.current = cleanAppointments;
           setTimeout(() => {
             isIncomingRemoteUpdateRef.current = false;
           }, 300);
@@ -740,7 +771,7 @@ export default function App() {
       }));
     } else {
       const newPat: Patient = {
-        id: `pat-${Date.now()}`,
+        id: generateUniqueId("pat"),
         name: newPatientName,
         rut: formattedRutVal,
         phone: newPatientPhone,
@@ -767,7 +798,7 @@ export default function App() {
         consentimientos: [],
       };
 
-      setPatients((prev) => [newPat, ...prev]);
+      setPatients((prev) => deduplicatePatients([newPat, ...prev]));
       setActivePatientId(newPat.id);
       setActiveTab("clinica"); // jump immediately to clinic charting for dentist
     }
@@ -807,7 +838,7 @@ export default function App() {
 
   // Appointment operations 
   const handleAddAppointment = useCallback((newApp: Appointment) => {
-    setAppointments((prev) => [newApp, ...prev]);
+    setAppointments((prev) => deduplicateAppointments([newApp, ...prev]));
   }, []);
 
   const handleUpdateAppointmentStatus = useCallback((id: string, status: Appointment["status"]) => {
@@ -1192,8 +1223,39 @@ export default function App() {
                           })}
                         </div>
 
-                        {/* Right Quick Controls (Return to Directory & Zen Toggle) */}
-                        <div className="flex items-center gap-2 shrink-0">
+                        {/* Right Quick Controls (Clinical Tools, Return to Directory & Zen Toggle) */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {activePatient && (
+                            <>
+                              <button
+                                onClick={() => setShowPrescriptionModal(true)}
+                                className="px-2.5 py-1.5 rounded-xl text-xs font-bold tracking-wide transition-all flex items-center gap-1.5 cursor-pointer bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/40 dark:hover:bg-teal-900/60 text-teal-700 dark:text-teal-300 border border-teal-200/80 dark:border-teal-800/80"
+                                title="Generar Receta Médica o Carta de Derivación Inteligente (con WhatsApp)"
+                              >
+                                <Pill className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                                <span className="hidden sm:inline">Receta & Derivación</span>
+                              </button>
+
+                              <button
+                                onClick={() => setShowPeriodontoComparison(true)}
+                                className="px-2.5 py-1.5 rounded-xl text-xs font-bold tracking-wide transition-all flex items-center gap-1.5 cursor-pointer bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700"
+                                title="Comparar Evolución Temporal Periodontal (Antes vs Después)"
+                              >
+                                <History className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                                <span className="hidden sm:inline">Evolución</span>
+                              </button>
+
+                              <button
+                                onClick={() => setShowKioskModal(true)}
+                                className="px-2.5 py-1.5 rounded-xl text-xs font-bold tracking-wide transition-all flex items-center gap-1.5 cursor-pointer bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700"
+                                title="Activar Modo Quiosco en Sala de Espera para Anamnesis y Consentimiento Táctil"
+                              >
+                                <Tablet className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                                <span className="hidden sm:inline">Modo Quiosco</span>
+                              </button>
+                            </>
+                          )}
+
                           {activePatientId && (
                             <button
                               onClick={() => {
@@ -1204,7 +1266,7 @@ export default function App() {
                               title="Volver a la lista de todos los pacientes"
                             >
                               <Users className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                              <span className="hidden sm:inline">Directorio Pacientes</span>
+                              <span className="hidden sm:inline">Directorio</span>
                             </button>
                           )}
 
@@ -1491,6 +1553,12 @@ export default function App() {
             onUpdateStatus={handleUpdateAppointmentStatus}
             onDeleteAppointment={handleDeleteAppointment}
             onUpdateAppointment={handleUpdateAppointment}
+            clinicName={clinicName}
+            doctorName={doctorName}
+            privacyMode={privacyMode}
+            onUpdatePatient={(updatedPat) => {
+              setPatients(prev => prev.map(p => p.id === updatedPat.id ? updatedPat : p));
+            }}
           />
         );
 
@@ -1724,9 +1792,9 @@ export default function App() {
               appointments={appointments}
               aranceles={aranceles}
               onRestoreData={(restoredPatients, restoredAppointments) => {
-                setPatients(restoredPatients);
+                setPatients(deduplicatePatients(restoredPatients));
                 if (restoredAppointments.length > 0) {
-                  setAppointments(restoredAppointments);
+                  setAppointments(deduplicateAppointments(restoredAppointments));
                 }
               }}
             />
@@ -1809,14 +1877,14 @@ export default function App() {
   }
 
   return (
-    <div className={`min-h-screen font-sans ${darkMode ? "dark text-slate-100 bg-[#040814]" : "bg-slate-50 text-slate-900"} flex flex-col md:flex-row relative transition-colors duration-300`}>
+    <div className={`min-h-screen font-sans ${darkMode ? "dark text-slate-100 bg-[#090d16]" : "bg-slate-50 text-slate-900"} flex flex-col md:flex-row relative transition-colors duration-300`}>
       {/* Dynamic Cosmic Slate Background (Visible in Dark Mode) */}
       {darkMode && (
-        <div className="fixed inset-0 -z-10 pointer-events-none overflow-hidden no-print bg-[#040814] will-change-transform">
+        <div className="fixed inset-0 -z-10 pointer-events-none overflow-hidden no-print bg-[#090d16] will-change-transform">
           {/* Static high-performance deep ambient gradients */}
-          <div className="absolute -top-[10%] -left-[10%] w-[60%] h-[60%] bg-teal-950/30 blur-[80px] rounded-full pointer-events-none" />
-          <div className="absolute top-[30%] -right-[15%] w-[70%] h-[70%] bg-emerald-950/20 blur-[90px] rounded-full pointer-events-none" />
-          <div className="absolute -bottom-[10%] left-[20%] w-[50%] h-[50%] bg-cyan-950/25 blur-[80px] rounded-full pointer-events-none" />
+          <div className="absolute -top-[10%] -left-[10%] w-[60%] h-[60%] bg-teal-950/20 blur-[90px] rounded-full pointer-events-none" />
+          <div className="absolute top-[30%] -right-[15%] w-[70%] h-[70%] bg-slate-900/30 blur-[100px] rounded-full pointer-events-none" />
+          <div className="absolute -bottom-[10%] left-[20%] w-[50%] h-[50%] bg-emerald-950/15 blur-[90px] rounded-full pointer-events-none" />
           
           {/* High-performance grid mask */}
           <div 
@@ -2144,18 +2212,15 @@ export default function App() {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
             </button>
 
-            {/* Quick Privacy Masking Mode Toggle */}
-            <button 
-              onClick={handleTogglePrivacyMode}
-              className={`p-2 border rounded-xl cursor-pointer transition-all ${
-                privacyMode 
-                  ? "bg-teal-500 text-white border-teal-400 shadow-xs" 
-                  : "bg-slate-50/30 dark:bg-slate-800/30 border-slate-100 dark:border-slate-800/50 text-slate-500 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50"
-              }`}
-              title={privacyMode ? "Modo Privacidad Activo (ePHI enmascarado)" : "Activar Enmascaramiento de Privacidad ePHI"}
-            >
-              {privacyMode ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5 text-teal-500" />}
-            </button>
+            {/* Security Hardening & PII Privacy Banner / Controls */}
+            <SecurityHardeningBanner
+              darkMode={darkMode}
+              currentUser={activeUser}
+              privacyMode={privacyMode}
+              onTogglePrivacyMode={handleTogglePrivacyMode}
+              inactivityMinutes={inactivityMinutes}
+              onChangeInactivityMinutes={handleChangeInactivityMinutes}
+            />
 
             {/* Quick Search */}
             <button 
@@ -2199,10 +2264,11 @@ export default function App() {
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.1, ease: "easeOut" }}
+              initial={{ opacity: 0, y: 6, scale: 0.998 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -4, scale: 0.998 }}
+              transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+              className="gpu-layer"
             >
               <Suspense fallback={<ClinicalViewSkeleton />}>
                 {renderTabContent()}
@@ -2240,6 +2306,82 @@ export default function App() {
         <AnimatePresence>
           {showShareModal && activePatient && (
             <SharePatientModal patient={activePatient} onClose={() => setShowShareModal(false)} />
+          )}
+
+          {showPrescriptionModal && activePatient && (
+            <PrescriptionAndReferralModal
+              isOpen={showPrescriptionModal}
+              onClose={() => setShowPrescriptionModal(false)}
+              patient={activePatient}
+              doctorName={doctorName}
+              clinicName={clinicName}
+              onAddEvolution={(newEvo) => {
+                const updatedPat: Patient = {
+                  ...activePatient,
+                  evolutions: [newEvo, ...(activePatient.evolutions || [])]
+                };
+                setPatients(prev => prev.map(p => p.id === updatedPat.id ? updatedPat : p));
+              }}
+            />
+          )}
+
+          {showPeriodontoComparison && activePatient && (
+            <PeriodontogramComparisonModal
+              isOpen={showPeriodontoComparison}
+              onClose={() => setShowPeriodontoComparison(false)}
+              patient={activePatient}
+              onSaveCurrentSnapshot={(title) => {
+                // Calculate periodontal summary parameters
+                let totalSites = 0;
+                let bopSites = 0;
+                let sumDepth = 0;
+                Object.values(activePatient.periodontogram || {}).forEach((state: any) => {
+                  ['vestibular', 'lingual'].forEach(arch => {
+                    const data = state?.[arch];
+                    if (data?.sondaje) {
+                      ['distal', 'medio', 'mesial'].forEach(pos => {
+                        const val = data.sondaje[pos];
+                        if (val && !isNaN(val)) {
+                          sumDepth += Number(val);
+                          totalSites++;
+                        }
+                      });
+                    }
+                    if (data?.sangrado) {
+                      ['distal', 'medio', 'mesial'].forEach(pos => {
+                        if (data.sangrado[pos]) bopSites++;
+                      });
+                    }
+                  });
+                });
+
+                const newSnapshot: PeriodontogramVisit = {
+                  id: `visit-${Date.now()}`,
+                  date: new Date().toISOString(),
+                  title: title,
+                  oLearyScore: 18,
+                  bopScore: totalSites > 0 ? Math.round((bopSites / totalSites) * 100) : 0,
+                  meanPocketDepth: totalSites > 0 ? Number((sumDepth / totalSites).toFixed(1)) : 2.4,
+                  periodontogram: activePatient.periodontogram
+                };
+                const updatedPat: Patient = {
+                  ...activePatient,
+                  periodontogramHistory: [newSnapshot, ...(activePatient.periodontogramHistory || [])]
+                };
+                setPatients(prev => prev.map(p => p.id === updatedPat.id ? updatedPat : p));
+              }}
+            />
+          )}
+
+          {showKioskModal && activePatient && (
+            <KioskModeModal
+              isOpen={showKioskModal}
+              onClose={() => setShowKioskModal(false)}
+              patient={activePatient}
+              onSavePatient={(updatedPat) => {
+                setPatients(prev => prev.map(p => p.id === updatedPat.id ? updatedPat : p));
+              }}
+            />
           )}
 
           {deletingPatientId && (

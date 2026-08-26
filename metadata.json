@@ -1,6 +1,6 @@
 {
   "name": "Periodash v02",
-  "description": "Enterprise Periodontal Charting \u0026 Dental Office SaaS containing an Interactive Odontogram, Periodontogram, and AI Assistant (Dentito).",
+  "description": "Enterprise Periodontal Charting & Dental Office SaaS with interactive odontogram, 6-point periodontogram, Google Calendar sync, and automated WhatsApp/Twilio appointment reminders.",
   "requestFramePermissions": [
     "camera",
     "microphone"

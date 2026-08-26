@@ -465,17 +465,17 @@ export default function FastProbingBar({
         initial={{ opacity: 0, y: 50, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 50, scale: 0.98 }}
-        className="fixed bottom-[calc(env(safe-area-inset-bottom)+72px)] md:bottom-6 left-1/2 -translate-x-1/2 z-50 w-[95%] max-w-3xl bg-slate-900/95 border border-teal-500/40 text-white rounded-3xl p-3.5 sm:p-4 shadow-2xl backdrop-blur-xl no-print font-sans"
+        className="fixed bottom-[calc(env(safe-area-inset-bottom)+72px)] md:bottom-6 left-1/2 -translate-x-1/2 z-50 w-[95%] max-w-3xl bg-slate-900/98 border border-slate-700/80 text-white rounded-2xl p-3.5 sm:p-4 shadow-2xl backdrop-blur-xl no-print font-sans"
       >
         {/* Top Header & Toggles */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
           <div className="flex items-center gap-2">
-            <span className="p-1.5 bg-amber-500/20 text-amber-400 rounded-xl">
-              <Zap className="w-4 h-4" />
+            <span className="p-1 bg-teal-500/10 text-teal-400 rounded-lg border border-teal-500/20">
+              <Zap className="w-3.5 h-3.5" />
             </span>
             <div>
-              <span className="text-xs font-bold text-teal-400">Sondaje Continuo Asistido</span>
-              <span className="text-[10px] text-slate-400 ml-1.5 hidden sm:inline">(Voz & Teclado Rápido)</span>
+              <span className="text-xs font-bold text-slate-100">Sondaje Continuo Asistido</span>
+              <span className="text-[10px] text-slate-400 ml-1.5 hidden sm:inline">(Protocolo 6 Sitios FDI)</span>
             </div>
           </div>
 

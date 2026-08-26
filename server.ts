@@ -17,14 +17,15 @@ app.use((req, res, next) => {
   // HTTP Strict Transport Security (HSTS) - Enforce TLS 1.2/1.3 for 1 year
   res.setHeader(
     "Strict-Transport-Security",
-    "max-age=31536000; includeSubDomains"
+    "max-age=31536000; includeSubDomains; preload"
   );
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   res.setHeader(
     "Permissions-Policy",
-    "camera=(self), microphone=(self), geolocation=(self)"
+    "camera=(self), microphone=(self), geolocation=()"
   );
   next();
 });
@@ -331,11 +332,162 @@ app.post("/api/dentito", rateLimiter, async (req, res) => {
     const result = await callGeminiWithRetry(ai, formattedContents, systemText);
     return res.json({ text: result.text });
   } catch (error: any) {
-    console.error("Error calling Gemini API after retries/fallbacks:", error);
-    const errStr = error.message || (typeof error === "object" ? JSON.stringify(error) : String(error));
+    console.error("Error calling Gemini API after retries/fallbacks:", error?.message || "Internal AI Error");
     return res.status(500).json({
       error: "Error de alta congestión temporal en el servidor de inteligencia artificial. Por favor intente en unos momentos.",
-      details: errStr,
+      code: "AI_SERVICE_CONGESTION"
+    });
+  }
+});
+
+// ==========================================
+// WHATSAPP & TWILIO REMINDER API SERVICE
+// ==========================================
+
+// Helper to normalize phone number to E.164 format
+function normalizePhoneForWhatsApp(rawPhone: string): { e164: string; digitsOnly: string } {
+  let cleaned = (rawPhone || "").replace(/[^0-9+]/g, "").trim();
+  
+  // If it doesn't have +, analyze structure
+  if (!cleaned.startsWith("+")) {
+    const digits = cleaned.replace(/[^0-9]/g, "");
+    if (digits.startsWith("56") && digits.length >= 11) {
+      cleaned = `+${digits}`;
+    } else if (digits.length === 9 && digits.startsWith("9")) {
+      // Chilean standard mobile (+56 9 XXXX XXXX)
+      cleaned = `+56${digits}`;
+    } else if (digits.length === 10 && (digits.startsWith("1") || digits.startsWith("52") || digits.startsWith("54"))) {
+      cleaned = `+${digits}`;
+    } else {
+      cleaned = `+${digits}`;
+    }
+  }
+
+  const digitsOnly = cleaned.replace(/[^0-9]/g, "");
+  return { e164: cleaned, digitsOnly };
+}
+
+// 1. Get WhatsApp / Twilio Integration Status (Rate limited & secure)
+app.get("/api/whatsapp/config", rateLimiter, (req, res) => {
+  const twilioSid = process.env.TWILIO_ACCOUNT_SID;
+  const twilioToken = process.env.TWILIO_AUTH_TOKEN;
+  const twilioPhone = process.env.TWILIO_WHATSAPP_NUMBER || "+14155238886";
+
+  const isConfigured = Boolean(twilioSid && twilioToken && twilioSid.trim() !== "" && twilioToken.trim() !== "");
+
+  res.json({
+    twilioConfigured: isConfigured,
+    fromNumber: twilioPhone,
+    accountSidMasked: twilioSid ? `${twilioSid.slice(0, 6)}...${twilioSid.slice(-4)}` : null,
+    provider: isConfigured ? "twilio_api" : "wa_me_direct",
+  });
+});
+
+// 2. Send automated WhatsApp reminder via Twilio API or generate direct wa.me link (Rate limited & validated)
+app.post("/api/whatsapp/send-reminder", rateLimiter, async (req, res) => {
+  try {
+    const { 
+      patientId, 
+      patientName, 
+      phoneNumber, 
+      message, 
+      templateType = "recordatorio_cita",
+      appointmentId,
+      forceDirectLink = false 
+    } = req.body;
+
+    if (!phoneNumber || typeof phoneNumber !== "string" || !message || typeof message !== "string") {
+      return res.status(400).json({
+        error: "Número telefónico y contenido del mensaje son obligatorios y deben ser texto válido.",
+      });
+    }
+
+    if (message.length > 4000) {
+      return res.status(400).json({
+        error: "El mensaje excede el tamaño máximo permitido de 4000 caracteres.",
+      });
+    }
+
+    const { e164, digitsOnly } = normalizePhoneForWhatsApp(phoneNumber);
+    const encodedMessage = encodeURIComponent(message);
+    const waMeUrl = `https://wa.me/${digitsOnly}?text=${encodedMessage}`;
+
+    const twilioSid = process.env.TWILIO_ACCOUNT_SID?.trim();
+    const twilioToken = process.env.TWILIO_AUTH_TOKEN?.trim();
+    let twilioFrom = process.env.TWILIO_WHATSAPP_NUMBER?.trim() || "+14155238886";
+    if (!twilioFrom.startsWith("whatsapp:")) {
+      twilioFrom = `whatsapp:${twilioFrom.startsWith("+") ? twilioFrom : `+${twilioFrom}`}`;
+    }
+
+    const twilioTo = `whatsapp:${e164}`;
+
+    // If direct link requested or Twilio not configured, return wa.me payload directly
+    if (forceDirectLink || !twilioSid || !twilioToken) {
+      return res.json({
+        success: true,
+        method: "wa_me_ready",
+        provider: "wa_me_direct",
+        phoneNumber: e164,
+        waMeUrl,
+        message: "Enlace directo de WhatsApp generado con éxito para envío manual o apertura en navegador/app.",
+        patientId,
+        appointmentId,
+        templateType,
+      });
+    }
+
+    // Call Twilio REST API directly
+    const twilioEndpoint = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
+    const authHeader = `Basic ${Buffer.from(`${twilioSid}:${twilioToken}`).toString("base64")}`;
+
+    const formParams = new URLSearchParams();
+    formParams.append("To", twilioTo);
+    formParams.append("From", twilioFrom);
+    formParams.append("Body", message);
+
+    const twilioResponse = await fetch(twilioEndpoint, {
+      method: "POST",
+      headers: {
+        "Authorization": authHeader,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: formParams.toString(),
+    });
+
+    const twilioData = (await twilioResponse.json()) as any;
+
+    if (!twilioResponse.ok) {
+      return res.json({
+        success: false,
+        method: "twilio_failed_fallback_ready",
+        provider: "twilio_api",
+        error: "No se pudo despachar por la API de Twilio (código de retorno del proveedor).",
+        code: twilioData.code,
+        waMeUrl,
+        message: "No se pudo despachar por la API de Twilio. Se ha activado el enlace directo seguro wa.me como contingencia.",
+        patientId,
+        appointmentId,
+      });
+    }
+
+    return res.json({
+      success: true,
+      method: "twilio",
+      provider: "twilio_api",
+      messageSid: twilioData.sid,
+      status: twilioData.status,
+      to: twilioData.to,
+      from: twilioData.from,
+      dateCreated: twilioData.date_created,
+      waMeUrl,
+      message: "Recordatorio de WhatsApp despachado exitosamente mediante la API oficial de Twilio.",
+      patientId,
+      appointmentId,
+      templateType,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      error: "Error interno procesando el recordatorio de WhatsApp. Los datos han sido resguardados.",
     });
   }
 });

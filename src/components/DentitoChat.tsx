@@ -1024,9 +1024,9 @@ He completado el análisis espectrográfico e interpretación semántica del arc
               "bottom-24 right-6" // default bottom-right
             }`}
           >
-            <div className="relative p-1 bg-white/80 dark:bg-slate-900/90 backdrop-blur-xl border border-teal-500/40 dark:border-teal-400/30 rounded-full shadow-[0_10px_35px_rgba(20,184,166,0.35)] dark:shadow-[0_10px_35px_rgba(20,184,166,0.5)] flex items-center gap-2.5 px-3 py-2 hover:scale-105 active:scale-95 transition-all">
+            <div className="relative p-1 bg-white/90 dark:bg-slate-900/95 backdrop-blur-xl border border-teal-500/30 dark:border-teal-500/20 rounded-full shadow-lg shadow-teal-950/20 flex items-center gap-2.5 px-3 py-2 hover:scale-102 active:scale-98 transition-all">
               <div className="relative w-10 h-10 flex items-center justify-center rounded-full shrink-0">
-                <div className="absolute inset-0 neon-rainbow-bg rounded-full pointer-events-none opacity-80 animate-spin-slow" />
+                <div className="absolute inset-0 clinical-gradient-bg rounded-full pointer-events-none opacity-80" />
                 <div className="absolute inset-[1.5px] bg-slate-100 dark:bg-slate-950 rounded-full z-0 pointer-events-none" />
                 <div className="relative z-10 w-full h-full rounded-full overflow-hidden flex items-center justify-center">
                   <ParticleSystem />
@@ -1035,10 +1035,10 @@ He completado el análisis espectrográfico e interpretación semántica del arc
               
               <div className="pr-1.5 hidden sm:flex flex-col text-left">
                 <div className="flex items-center gap-1.5">
-                  <span className="font-display font-black text-xs text-slate-800 dark:text-white">Dentito</span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+                  <span className="font-display font-bold text-xs text-slate-800 dark:text-white">Dentito</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
                 </div>
-                <span className="text-[9px] font-bold text-teal-600 dark:text-teal-400 tracking-tight">Copiloto IA</span>
+                <span className="text-[9px] font-semibold text-teal-600 dark:text-teal-400 tracking-tight">Copiloto Clínico</span>
               </div>
             </div>
           </motion.div>
@@ -1083,8 +1083,8 @@ He completado el análisis espectrográfico e interpretación semántica del arc
               className="flex items-center justify-between px-5 py-3 border-b border-slate-200/60 dark:border-slate-800/80 cursor-grab active:cursor-grabbing relative bg-gradient-to-br from-teal-500/10 via-transparent to-transparent select-none shrink-0"
             >
               <div className="flex items-center gap-3.5">
-                <div className="relative w-[42px] h-[42px] flex items-center justify-center rounded-full shadow-inner p-[2px] shrink-0">
-                   <div className="absolute inset-0 neon-rainbow-bg rounded-full pointer-events-none opacity-100" />
+                <div className="relative w-[40px] h-[40px] flex items-center justify-center rounded-full shadow-inner p-[2px] shrink-0">
+                   <div className="absolute inset-0 clinical-gradient-bg rounded-full pointer-events-none opacity-90" />
                    <div className="absolute inset-[2px] bg-slate-100 dark:bg-slate-900 rounded-full z-0 pointer-events-none" />
                    <div className="relative z-10 w-full h-full rounded-full overflow-hidden flex items-center justify-center border border-white/30 dark:border-white/5 bg-slate-50 dark:bg-slate-900">
                       <ParticleSystem />

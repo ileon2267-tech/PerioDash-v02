@@ -45,9 +45,11 @@ export interface Anamnesis {
   historiaMotivoConsulta?: string;
   hta: boolean;
   diabetes: boolean;
+  cardiopatia?: boolean;
   diabetesStatus?: "none" | "controlled" | "severe";
   tabaquismo: number; // cigarrillos/dia
   alergias: string;
+  farmacos?: string;
   dolorActual: "ninguno" | "leve" | "pulsatil" | "agudo";
   notasSistemicas: string;
   edadSimulada?: number;
@@ -281,6 +283,9 @@ export type HipaaActionType =
   | 'EXPORT_PDF_REPORT'
   | 'DELETE_PATIENT'
   | 'CONSENT_SIGNED'
+  | 'KIOSK_ANAMNESIS_COMPLETED'
+  | 'GENERATE_PRESCRIPTION'
+  | 'GENERATE_REFERRAL'
   | 'HIPAA_CONSENT_SIGNED'
   | 'HIPAA_CONSENT_REVOKED'
   | 'SESSION_AUTO_LOCKED'

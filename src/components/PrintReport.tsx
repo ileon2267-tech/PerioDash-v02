@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Patient } from "../types";
-import { Printer, ShieldCheck, User, Pill } from "lucide-react";
+import { Printer, ShieldCheck, User, Pill, FileSignature, FileText, CheckCircle } from "lucide-react";
 import Logo from "./Logo";
 import Odontograma from "./Odontograma";
 import Periodontograma from "./Periodontograma";
@@ -13,7 +13,7 @@ interface PrintReportProps {
   clinicName: string;
 }
 
-type PrintTemplateType = "completo" | "presupuesto" | "receta";
+type PrintTemplateType = "completo" | "presupuesto" | "receta" | "consentimiento";
 
 export default function PrintReport({ activePatient, doctorName, clinicName }: PrintReportProps) {
   const [templateType, setTemplateType] = useState<PrintTemplateType>("completo");
@@ -120,6 +120,14 @@ export default function PrintReport({ activePatient, doctorName, clinicName }: P
             >
               Receta Médica
             </button>
+            <button
+              onClick={() => setTemplateType("consentimiento")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                templateType === "consentimiento" ? "bg-white dark:bg-slate-900 text-teal-600 shadow-xs" : "text-slate-600 dark:text-slate-400"
+              }`}
+            >
+              Consentimiento
+            </button>
           </div>
 
           <button 
@@ -144,7 +152,13 @@ export default function PrintReport({ activePatient, doctorName, clinicName }: P
                 </h1>
                 <p className="text-slate-600 font-mono mt-0.5 flex items-center gap-1.5 text-xs">
                   <ShieldCheck className="w-3.5 h-3.5 text-teal-700"/>
-                  {templateType === "receta" ? "Recetario Médico Odontológico" : templateType === "presupuesto" ? "Presupuesto Odontológico Formal" : "Ficha Clínica & Diagnóstico Integral"}
+                  {templateType === "receta" 
+                    ? "Recetario Médico Odontológico" 
+                    : templateType === "presupuesto" 
+                    ? "Presupuesto Odontológico Formal" 
+                    : templateType === "consentimiento"
+                    ? "Consentimiento Informado Clínico & Quirúrgico"
+                    : "Ficha Clínica & Diagnóstico Integral"}
                 </p>
               </div>
             </div>
@@ -256,6 +270,35 @@ export default function PrintReport({ activePatient, doctorName, clinicName }: P
                <p className="font-bold">Condiciones Comerciales:</p>
                <p>• Presupuesto con validez de 30 días corridos.</p>
                <p>• Facilidades de pago: Tarjeta de Crédito, Transferencia Bancaria y financiamiento en cuotas.</p>
+             </div>
+           </div>
+         )}
+
+         {/* TEMPLATE: CONSENTIMIENTO INFORMADO */}
+         {templateType === "consentimiento" && (
+           <div className="space-y-6 my-6 text-xs leading-relaxed">
+             <h3 className="font-bold text-base border-b border-slate-300 pb-2 font-display text-slate-900 flex items-center gap-2">
+               <FileSignature className="w-5 h-5 text-teal-700" />
+               Documento Oficial de Consentimiento Informado Quirúrgico & Periodontal
+             </h3>
+
+             <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 text-slate-700">
+               <p>
+                 Yo, <strong>{activePatient.name}</strong>, identificado(a) con RUT/ID <strong>{activePatient.rut || activePatient.dni || activePatient.id}</strong>, en pleno uso de mis facultades mentales, declaro que el profesional tratante <strong>{doctorName || "Cirujano Dentista"}</strong> me ha explicado en forma clara, comprensible y detallada:
+               </p>
+               <ol className="list-decimal pl-5 space-y-1.5 font-medium">
+                 <li>La naturaleza de mi diagnóstico clínico actual y las consecuencias previsibles de no recibir tratamiento oportuno.</li>
+                 <li>Los objetivos y etapas del plan terapéutico propuesto (procedimientos periodontales, quirúrgicos, rehabilitadores o profilácticos).</li>
+                 <li>Los riesgos inherentes y eventuales molestias postoperatorias transitorias (sensibilidad térmica, inflamación local o hematomas leves).</li>
+                 <li>Las alternativas terapéuticas disponibles y la importancia de mi colaboración activa en la higiene bucal y controles periódicos.</li>
+               </ol>
+               <p className="text-[11px] text-slate-600">
+                 He tenido la oportunidad de formular todas las preguntas necesarias, las cuales han sido respondidas a mi entera satisfacción. Por tanto, otorgo libre y voluntariamente mi consentimiento para la ejecución de los procedimientos clínicos planificados.
+               </p>
+             </div>
+
+             <div className="p-3 bg-teal-50 border border-teal-200 rounded-lg text-[11px] text-teal-950 font-medium">
+               ✓ Emitido conforme a la legislación de Derechos y Deberes de los Pacientes y normativas de confidencialidad de la información de salud (HIPAA / GDPR).
              </div>
            </div>
          )}

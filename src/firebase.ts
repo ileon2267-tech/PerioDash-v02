@@ -1,29 +1,86 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-import { initializeAppCheck, ReCaptchaV3Provider, type AppCheck } from 'firebase/app-check';
+import { initializeAppCheck, ReCaptchaEnterpriseProvider, type AppCheck } from 'firebase/app-check';
 import firebaseConfig from '../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
+// Inicialización controlada previniendo inicialización múltiple
+export const app: FirebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firebase App Check with reCAPTCHA v3 only when configured
+// Initialize Firebase App Check using ReCaptchaEnterpriseProvider safely
 export let appCheck: AppCheck | null = null;
 
-const reCaptchaKey = ((import.meta as any).env?.VITE_RECAPTCHA_V3_SITE_KEY as string) || (firebaseConfig as any).recaptchaSiteKey || '';
+const RECAPTCHA_ENTERPRISE_SITE_KEY = '6LfFJ5ktAAAAAGNZZbNOs9gkNVdv6W3vctQ58uAw';
 
-if (typeof window !== 'undefined' && reCaptchaKey) {
-  try {
-    if (process.env.NODE_ENV !== 'production' || (import.meta as any).env?.DEV) {
-      (self as any).FIREBASE_APPCHECK_DEBUG_TOKEN = (import.meta as any).env?.VITE_APPCHECK_DEBUG_TOKEN || true;
-    }
-    appCheck = initializeAppCheck(app, {
-      provider: new ReCaptchaV3Provider(reCaptchaKey),
-      isTokenAutoRefreshEnabled: true,
-    });
-    console.log('🛡️ Firebase App Check initialized with reCAPTCHA v3 Provider.');
-  } catch (err) {
-    console.warn('Firebase App Check initialization notice:', err);
+/**
+ * Inicialización segura y encapsulada de Firebase App Check.
+ * Verifica si getApps().length > 0 y si la app activa está lista antes de aplicar App Check.
+ */
+export function initAppCheckSafely(): AppCheck | null {
+  if (appCheck) return appCheck;
+  if (typeof window === 'undefined') return null;
+
+  // Verificar que exista al menos una app de Firebase inicializada en el contexto
+  if (getApps().length === 0) {
+    console.warn('⚠️ [App Check]: No se puede inicializar App Check porque no hay aplicaciones de Firebase activas (getApps().length === 0).');
+    return null;
   }
+
+  const targetApp = app || getApp();
+  if (!targetApp) {
+    console.warn('⚠️ [App Check]: No se pudo obtener la instancia activa de Firebase App.');
+    return null;
+  }
+
+  try {
+    const isDev = (import.meta as any).env?.DEV || process.env.NODE_ENV !== 'production';
+
+    // Usar el token de depuración solo cuando la aplicación esté en entorno de desarrollo
+    if (isDev) {
+      const debugToken = (import.meta as any).env?.VITE_APPCHECK_DEBUG_TOKEN;
+      (self as any).FIREBASE_APPCHECK_DEBUG_TOKEN = debugToken || true;
+      console.info('🛡️ Firebase App Check: Token de depuración habilitado en entorno de desarrollo.');
+    }
+
+    if (typeof initializeAppCheck === 'function' && typeof ReCaptchaEnterpriseProvider === 'function') {
+      appCheck = initializeAppCheck(targetApp, {
+        provider: new ReCaptchaEnterpriseProvider(RECAPTCHA_ENTERPRISE_SITE_KEY),
+        isTokenAutoRefreshEnabled: true,
+      });
+
+      if (isDev) {
+        if (appCheck) {
+          console.log(
+            '%c🛡️ [App Check Dev]: Inicializado correctamente con ReCaptchaEnterpriseProvider.',
+            'background: #0f766e; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
+            {
+              siteKey: `${RECAPTCHA_ENTERPRISE_SITE_KEY.slice(0, 10)}...`,
+              autoRefresh: true,
+              debugTokenActive: !!(self as any).FIREBASE_APPCHECK_DEBUG_TOKEN,
+            }
+          );
+        } else {
+          console.warn('⚠️ [App Check Dev]: initializeAppCheck retornó null o no se pudo instanciar.');
+        }
+      }
+    } else {
+      console.warn('⚠️ [App Check]: El SDK de App Check o el proveedor ReCaptchaEnterprise no están disponibles en este entorno.');
+    }
+  } catch (err) {
+    const isDev = (import.meta as any).env?.DEV || process.env.NODE_ENV !== 'production';
+    if (isDev) {
+      console.error('❌ [App Check Dev Error]: Falló la inicialización de Firebase App Check:', err);
+    } else {
+      console.warn('Aviso en inicialización de Firebase App Check:', err);
+    }
+  }
+
+  return appCheck;
+}
+
+// Ejecutar inicialización segura si estamos en el cliente y la app está lista
+if (typeof window !== 'undefined' && app) {
+  initAppCheckSafely();
 }
 
 export const db = (firebaseConfig as any).firestoreDatabaseId 

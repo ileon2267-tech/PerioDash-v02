@@ -1,6 +1,6 @@
 import { Patient, ToothState, PeriodonState, Appointment, OLearyState, Anamnesis, XRayImage, TreatmentPlan, TreatmentProcedure } from "./types";
 
-// Adult FDI Two-Digit Notation Teeth lists:
+// Adult FDI Two-Digit Notation Teeth lists (11-48):
 export const UPPER_TEETH = {
   right: [18, 17, 16, 15, 14, 13, 12, 11],
   left: [21, 22, 23, 24, 25, 26, 27, 28]
@@ -16,9 +16,30 @@ export const ALL_TEETH_NUMBERS = [
   ...LOWER_TEETH.right, ...LOWER_TEETH.left
 ];
 
+// Pediatric FDI Two-Digit Notation Teeth lists (51-85):
+export const PEDIATRIC_UPPER_TEETH = {
+  right: [55, 54, 53, 52, 51],
+  left: [61, 62, 63, 64, 65]
+};
+
+export const PEDIATRIC_LOWER_TEETH = {
+  right: [85, 84, 83, 82, 81],
+  left: [71, 72, 73, 74, 75]
+};
+
+export const ALL_PEDIATRIC_TEETH_NUMBERS = [
+  ...PEDIATRIC_UPPER_TEETH.right, ...PEDIATRIC_UPPER_TEETH.left,
+  ...PEDIATRIC_LOWER_TEETH.right, ...PEDIATRIC_LOWER_TEETH.left
+];
+
+export const ALL_COMBINED_TEETH_NUMBERS = [
+  ...ALL_TEETH_NUMBERS,
+  ...ALL_PEDIATRIC_TEETH_NUMBERS
+];
+
 export function createEmptyOdontogram(): Record<number, ToothState> {
   const odo: Record<number, ToothState> = {};
-  ALL_TEETH_NUMBERS.forEach((num) => {
+  ALL_COMBINED_TEETH_NUMBERS.forEach((num) => {
     odo[num] = {
       toothNumber: num,
       surfaces: {
@@ -36,7 +57,7 @@ export function createEmptyOdontogram(): Record<number, ToothState> {
 
 export function createEmptyPeriodontogram(): Record<number, PeriodonState> {
   const perio: Record<number, PeriodonState> = {};
-  ALL_TEETH_NUMBERS.forEach((num) => {
+  ALL_COMBINED_TEETH_NUMBERS.forEach((num) => {
     perio[num] = {
       toothNumber: num,
       vestibularPocket: { mesial: 2, central: 1, distal: 2 },
@@ -58,7 +79,7 @@ export function createEmptyPeriodontogram(): Record<number, PeriodonState> {
 
 export function createEmptyOLeary(): Record<number, OLearyState> {
   const oleary: Record<number, OLearyState> = {};
-  ALL_TEETH_NUMBERS.forEach((num) => {
+  ALL_COMBINED_TEETH_NUMBERS.forEach((num) => {
     oleary[num] = {
       toothNumber: num,
       mesial: false,
