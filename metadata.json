@@ -1,0 +1,11 @@
+{
+  "name": "Periodash v02",
+  "description": "Enterprise Periodontal Charting \u0026 Dental Office SaaS containing an Interactive Odontogram, Periodontogram, and AI Assistant (Dentito).",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

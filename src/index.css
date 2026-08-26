@@ -1,0 +1,234 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap');
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-display: "Space Grotesk", sans-serif;
+
+  --color-brand-teal: #0d9488;
+  --color-brand-teal-light: #14b8a6;
+  --color-brand-teal-dark: #0f766e;
+  --color-brand-navy: #0f172a;
+}
+
+/* Animations */
+@keyframes neon-flow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+@keyframes neon-pulse {
+  0%, 100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.neon-rainbow-bg {
+  background: linear-gradient(
+    90deg,
+    #0d9488, 
+    #06b6d4, 
+    #10b981,
+    #0284c7, 
+    #0d9488 
+  );
+  background-size: 200% auto;
+  will-change: background-position;
+  animation: neon-flow 8s linear infinite;
+}
+
+.neon-intense-glow {
+  animation: neon-pulse 3s ease-in-out infinite;
+}
+
+.neon-box-pulse {
+  box-shadow: 0 0 12px rgba(20, 184, 166, 0.2);
+}
+
+@keyframes neon-box-pulse-anim {
+  0% {
+    box-shadow: 0 0 8px rgba(0, 255, 204, 0.2), 0 0 15px rgba(162, 0, 255, 0.1);
+  }
+  100% {
+    box-shadow: 0 0 18px rgba(0, 255, 204, 0.45), 0 0 35px rgba(255, 0, 170, 0.25);
+  }
+}
+
+.neon-text-rainbow {
+  background: linear-gradient(
+    135deg,
+    #00ffcc 10%, 
+    #00bfff 35%, 
+    #ff00aa 70%,
+    #a200ff 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* Utility to support iOS safe areas on bottom tabs */
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Base style resets */
+body {
+  background-color: #f1f5f9;
+  color: #020617;
+  font-family: var(--font-sans);
+  letter-spacing: -0.01em;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.dark {
+  background-color: #040814;
+  color: #f1f5f9;
+}
+
+/* ==========================================================================
+   LIGHT MODE SHARPNESS & HIGH-CONTRAST ENHANCEMENTS
+   ========================================================================== */
+html:not(.dark) {
+  color-scheme: light;
+}
+
+/* Sharp Card & Panel Boundaries */
+html:not(.dark) .bg-white {
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
+}
+
+/* Sharpen light mode borders across faint border classes */
+html:not(.dark) .border-slate-50,
+html:not(.dark) .border-slate-100 {
+  border-color: #cbd5e1;
+}
+
+/* Sharpen muted text contrast in light mode */
+html:not(.dark) .text-slate-400 {
+  color: #475569; /* Slate-600 for sharp secondary text */
+}
+
+html:not(.dark) .text-slate-500 {
+  color: #334155; /* Slate-700 for high legibility */
+}
+
+/* High contrast inputs and form controls in light mode */
+html:not(.dark) input:not([type="checkbox"]):not([type="radio"]),
+html:not(.dark) select,
+html:not(.dark) textarea {
+  color: #020617 !important;
+  background-color: #ffffff !important;
+  border-color: #94a3b8 !important; /* Slate-400 crisp border */
+}
+
+html:not(.dark) input:focus,
+html:not(.dark) select:focus,
+html:not(.dark) textarea:focus {
+  border-color: #0d9488 !important;
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.25) !important;
+}
+
+html:not(.dark) input::placeholder,
+html:not(.dark) textarea::placeholder {
+  color: #64748b !important;
+}
+
+/* High contrast tables in light mode */
+html:not(.dark) table thead {
+  background-color: #f8fafc;
+  border-bottom: 2px solid #cbd5e1;
+}
+
+html:not(.dark) table th {
+  color: #0f172a !important;
+  font-weight: 800 !important;
+}
+
+html:not(.dark) table td {
+  border-color: #e2e8f0;
+}
+
+/* Sharp glass panels in light mode */
+html:not(.dark) .glass-panel {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.04) !important;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Hide scrollbar utility for mobile overflow nav */
+@utility hide-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Custom styles for tooth box diagram surfaces */
+.tooth-surface {
+  transition: all 0.15s ease-in-out;
+  cursor: pointer;
+}
+.tooth-surface:hover {
+  opacity: 0.82;
+  filter: brightness(0.95);
+}
+
+/* Glassmorphism overlays */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(241, 245, 249, 0.8);
+}
+.dark .glass-panel {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(30, 41, 59, 0.8);
+}
+
+/* Print scaling configurations for periodontograma reports */
+@media print {
+  body {
+    background: white;
+    color: black;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-card {
+    border: none !important;
+    box-shadow: none !important;
+    width: 100% !important;
+  }
+}
+

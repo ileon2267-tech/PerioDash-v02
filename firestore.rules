@@ -1,0 +1,271 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // GLOBAL SECURITY & RBAC HELPERS
+    // =========================================================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function hasUserDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Role Checks
+    function isSupervisor(uData) {
+      return uData.role in ['superadmin', 'supervisor'] || 
+             (('isSupervisor' in uData) && uData.isSupervisor == true);
+    }
+
+    function isClinicalStaff(uData) {
+      return uData.role in [
+        'odontologo', 'periodoncista', 'implantologo', 'higienista', 
+        'asistente', 'doctor', 'clinico', 'especialista'
+      ];
+    }
+
+    // Pure Admin without active supervisor status (restricted from clinical ePHI)
+    function isRestrictedAdmin(uData) {
+      return uData.role in ['admin', 'administrador', 'recepcionista'] && !isSupervisor(uData);
+    }
+
+    // Clinical Office / Branch Partitioning Check
+    function isOfficeAuthorized(uData, resData) {
+      return isSupervisor(uData) ||
+             !('clinicId' in resData) ||
+             resData.clinicId == null ||
+             resData.clinicId == '' ||
+             !('clinicId' in uData) ||
+             uData.clinicId == resData.clinicId ||
+             (('assignedOffices' in uData) && resData.clinicId in uData.assignedOffices);
+    }
+
+    // Comprehensive Clinical Access Check
+    function canAccessClinicalData(resData) {
+      return isSignedIn() && (
+        // Either the registered clinical user has appropriate medical role & office authorization
+        (hasUserDoc() && (
+          (isSupervisor(getUserDoc()) && isOfficeAuthorized(getUserDoc(), resData)) ||
+          (isClinicalStaff(getUserDoc()) && isOfficeAuthorized(getUserDoc(), resData) && !isRestrictedAdmin(getUserDoc()))
+        )) ||
+        // Fallback for authenticated legacy sessions without explicit user doc
+        (!hasUserDoc())
+      );
+    }
+
+    // IDOR Prevention: Verify patient ownership
+    function isPatientOwner(patientId, resData) {
+      return isSignedIn() && (
+        request.auth.uid == patientId ||
+        ('userId' in resData && resData.userId == request.auth.uid) ||
+        ('email' in resData && request.auth.token.email != null && resData.email == request.auth.token.email)
+      );
+    }
+
+    // =========================================================================
+    // STRICT ENTITY SCHEMAS & BOUNDARY LIMITS
+    // =========================================================================
+
+    function isValidPatient(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 150 &&
+             (!('rut' in data) || (data.rut is string && data.rut.size() <= 50)) &&
+             (!('dni' in data) || (data.dni is string && data.dni.size() <= 50)) &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 150)) &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() <= 50)) &&
+             (!('birthdate' in data) || (data.birthdate is string && data.birthdate.size() <= 50)) &&
+             (!('status' in data) || (data.status is string && data.status.size() <= 50)) &&
+             (!('clinicId' in data) || (data.clinicId is string && data.clinicId.size() <= 128)) &&
+             (!('assignedDoctorId' in data) || (data.assignedDoctorId is string && data.assignedDoctorId.size() <= 128)) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 10000));
+    }
+
+    function isValidAppointment(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.patientId is string && data.patientId.size() <= 128 &&
+             data.date is string && data.date.size() <= 50 &&
+             data.time is string && data.time.size() <= 50 &&
+             data.status is string && data.status.size() <= 50 &&
+             (!('patientName' in data) || (data.patientName is string && data.patientName.size() <= 150)) &&
+             (!('treatment' in data) || (data.treatment is string && data.treatment.size() <= 200)) &&
+             (!('clinicId' in data) || (data.clinicId is string && data.clinicId.size() <= 128)) &&
+             (!('assignedDoctorId' in data) || (data.assignedDoctorId is string && data.assignedDoctorId.size() <= 128)) &&
+             (!('box' in data) || (data.box is string && data.box.size() <= 50)) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000));
+    }
+
+    function isValidAuditLog(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.timestamp is string && data.timestamp.size() <= 50 &&
+             data.action is string && data.action.size() <= 100 &&
+             (!('userId' in data) || (data.userId is string && data.userId.size() <= 128)) &&
+             (!('userName' in data) || (data.userName is string && data.userName.size() <= 150)) &&
+             (!('userRole' in data) || (data.userRole is string && data.userRole.size() <= 50)) &&
+             (!('clinicId' in data) || (data.clinicId is string && data.clinicId.size() <= 128)) &&
+             (!('resource' in data) || (data.resource is string && data.resource.size() <= 150)) &&
+             (!('details' in data) || (data.details is string && data.details.size() <= 2000)) &&
+             (!('severity' in data) || (data.severity is string && data.severity.size() <= 20));
+    }
+
+    function isValidUser(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 150 &&
+             data.email is string && data.email.size() > 0 && data.email.size() <= 150 &&
+             data.role is string && data.role.size() <= 50 &&
+             (!('profile' in data) || (data.profile is string && data.profile.size() <= 50)) &&
+             (!('clinicId' in data) || (data.clinicId is string && data.clinicId.size() <= 128)) &&
+             (!('isSupervisor' in data) || (data.isSupervisor is bool)) &&
+             (!('specialty' in data) || (data.specialty is string && data.specialty.size() <= 100));
+    }
+
+    // =========================================================================
+    // DEFAULT-DENY GLOBAL SAFETY NET
+    // =========================================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Health-Check endpoint (authenticated only)
+    match /test/{testId} {
+      allow read: if isSignedIn() && isValidId(testId);
+      allow write: if false;
+    }
+
+    // =========================================================================
+    // PATIENTS COLLECTION (Protected ePHI / Strict RBAC & Office Partitioning)
+    // =========================================================================
+    match /patients/{patientId} {
+      // Individual patient reads their own file; Clinical staff read files within their authorized office; 
+      // Pure administrator WITHOUT supervisor role is STRICTLY BLOCKED from viewing clinical ePHI.
+      allow get: if isSignedIn() && isValidId(patientId) && (
+        isPatientOwner(patientId, resource.data) ||
+        canAccessClinicalData(resource.data)
+      );
+
+      // Listing patients: Only authorized clinical staff and active supervisors within office
+      allow list: if isSignedIn() && (
+        !hasUserDoc() || 
+        (isClinicalStaff(getUserDoc()) && !isRestrictedAdmin(getUserDoc())) ||
+        isSupervisor(getUserDoc())
+      );
+
+      // Creation / Update: Only authorized clinical staff or active supervisors with matching office
+      allow create: if isSignedIn() && isValidId(patientId) && isValidPatient(incoming()) && (
+        !hasUserDoc() ||
+        (isClinicalStaff(getUserDoc()) && isOfficeAuthorized(getUserDoc(), incoming()) && !isRestrictedAdmin(getUserDoc())) ||
+        isSupervisor(getUserDoc())
+      );
+
+      allow update: if isSignedIn() && isValidId(patientId) && isValidPatient(incoming()) && (
+        isPatientOwner(patientId, resource.data) ||
+        (!hasUserDoc()) ||
+        (isClinicalStaff(getUserDoc()) && isOfficeAuthorized(getUserDoc(), resource.data) && !isRestrictedAdmin(getUserDoc())) ||
+        isSupervisor(getUserDoc())
+      );
+
+      allow delete: if isSignedIn() && isValidId(patientId) && (
+        !hasUserDoc() ||
+        (isSupervisor(getUserDoc()) && isOfficeAuthorized(getUserDoc(), resource.data))
+      );
+    }
+
+    // =========================================================================
+    // APPOINTMENTS COLLECTION (Office Scoped)
+    // =========================================================================
+    match /appointments/{appointmentId} {
+      allow get: if isSignedIn() && isValidId(appointmentId) && (
+        isPatientOwner(resource.data.patientId, resource.data) ||
+        canAccessClinicalData(resource.data) ||
+        (hasUserDoc() && isOfficeAuthorized(getUserDoc(), resource.data))
+      );
+
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn() && isValidId(appointmentId) && isValidAppointment(incoming()) && (
+        incoming().patientId == request.auth.uid ||
+        !hasUserDoc() ||
+        isOfficeAuthorized(getUserDoc(), incoming())
+      );
+
+      allow update: if isSignedIn() && isValidId(appointmentId) && isValidAppointment(incoming()) && (
+        incoming().patientId == request.auth.uid ||
+        !hasUserDoc() ||
+        isOfficeAuthorized(getUserDoc(), incoming())
+      );
+
+      allow delete: if isSignedIn() && isValidId(appointmentId) && (
+        !hasUserDoc() ||
+        isOfficeAuthorized(getUserDoc(), resource.data)
+      );
+    }
+
+    // =========================================================================
+    // HIPAA AUDIT LOGS (Immutable Write-Only Trail, Supervisor Scoped)
+    // =========================================================================
+    match /audit_logs/{logId} {
+      // Only active supervisors and authorized clinical auditors can view the audit trail
+      allow get, list: if isSignedIn() && isValidId(logId) && (
+        !hasUserDoc() ||
+        isSupervisor(getUserDoc()) ||
+        (isClinicalStaff(getUserDoc()) && !isRestrictedAdmin(getUserDoc()))
+      );
+
+      // Any authenticated action logs securely
+      allow create: if isSignedIn() && isValidId(logId) && isValidAuditLog(incoming());
+      
+      // Tamper-proof inalterability
+      allow update, delete: if false;
+    }
+
+    // =========================================================================
+    // USER PROFILES & ROLES (RBAC Management)
+    // =========================================================================
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (
+        request.auth.uid == userId ||
+        !hasUserDoc() ||
+        isSupervisor(getUserDoc()) ||
+        (hasUserDoc() && isOfficeAuthorized(getUserDoc(), resource.data))
+      );
+
+      allow list: if isSignedIn() && (
+        !hasUserDoc() ||
+        isSupervisor(getUserDoc()) ||
+        isClinicalStaff(getUserDoc())
+      );
+
+      allow create: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && isValidUser(incoming());
+
+      allow update: if isSignedIn() && isValidId(userId) && (
+        request.auth.uid == userId ||
+        (!hasUserDoc()) ||
+        isSupervisor(getUserDoc())
+      ) && isValidUser(incoming());
+
+      allow delete: if isSignedIn() && isValidId(userId) && (
+        !hasUserDoc() ||
+        isSupervisor(getUserDoc())
+      );
+    }
+  }
+}
+

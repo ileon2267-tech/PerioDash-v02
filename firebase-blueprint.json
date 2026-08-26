@@ -1,0 +1,109 @@
+{
+  "entities": {
+    "Patient": {
+      "title": "Patient",
+      "description": "Patient file in PerioDash containing clinical dental records, odontogram, periodontogram and anamnesis.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "rut": { "type": "string", "maxLength": 50 },
+        "dni": { "type": "string", "maxLength": 50 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "email": { "type": "string", "maxLength": 150 },
+        "birthdate": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "maxLength": 50 },
+        "notes": { "type": "string", "maxLength": 10000 },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "clinicId": { "type": "string", "maxLength": 128 },
+        "assignedDoctorId": { "type": "string", "maxLength": 128 },
+        "odontogram": { "type": "object" },
+        "periodontogram": { "type": "object" },
+        "oLeary": { "type": "object" },
+        "anamnesis": { "type": "object" },
+        "xRays": { "type": "array" },
+        "treatmentPlan": { "type": "object" },
+        "evolutions": { "type": "array" },
+        "specialtyData": { "type": "object" }
+      },
+      "required": ["id", "name"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "An appointment scheduled for a Patient.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "patientId": { "type": "string", "maxLength": 128 },
+        "patientName": { "type": "string", "maxLength": 150 },
+        "date": { "type": "string", "maxLength": 50 },
+        "time": { "type": "string", "maxLength": 50 },
+        "treatment": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "maxLength": 50 },
+        "clinicId": { "type": "string", "maxLength": 128 },
+        "assignedDoctorId": { "type": "string", "maxLength": 128 },
+        "box": { "type": "string", "maxLength": 50 },
+        "notes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["id", "patientId", "date", "time", "status"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable HIPAA access and audit log entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string", "maxLength": 50 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 150 },
+        "userRole": { "type": "string", "maxLength": 50 },
+        "clinicId": { "type": "string", "maxLength": 128 },
+        "action": { "type": "string", "maxLength": 100 },
+        "resource": { "type": "string", "maxLength": 150 },
+        "details": { "type": "string", "maxLength": 2000 },
+        "severity": { "type": "string", "maxLength": 20 }
+      },
+      "required": ["id", "timestamp", "action"]
+    },
+    "ClinicalUser": {
+      "title": "ClinicalUser",
+      "description": "Clinical staff or patient user profile with access control role and office partitioning.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "email": { "type": "string", "maxLength": 150 },
+        "role": { "type": "string", "maxLength": 50 },
+        "clinicId": { "type": "string", "maxLength": 128 },
+        "assignedOffices": { "type": "array" },
+        "isSupervisor": { "type": "boolean" },
+        "permissions": { "type": "array" },
+        "profile": { "type": "string", "maxLength": 50 },
+        "specialty": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "name", "email", "role"]
+    }
+  },
+  "firestore": {
+    "patients/{patientId}": {
+      "schema": "Patient",
+      "description": "Read and write clinical files for patients with strict role validation, clinic office partition and IDOR prevention."
+    },
+    "appointments/{appointmentId}": {
+      "schema": "Appointment",
+      "description": "Clinical appointment records restricted to authorized clinical staff within office and verified patients."
+    },
+    "audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Immutable HIPAA audit trail for ePHI access and operations."
+    },
+    "users/{userId}": {
+      "schema": "ClinicalUser",
+      "description": "User profiles, RBAC role assignments, office permissions and supervisor flags."
+    }
+  }
+}
