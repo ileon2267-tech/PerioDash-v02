@@ -1196,9 +1196,9 @@ Fecha de emisión: ${new Date().toLocaleDateString()}
               onClick={(e) => e.stopPropagation()}
               className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col border border-slate-200 dark:border-slate-800 my-auto"
             >
-              {/* Header Cover */}
-              <div className="h-28 bg-gradient-to-r from-teal-800 via-teal-700 to-emerald-700 relative flex items-start justify-between p-4">
-                <div className="flex items-center gap-2 px-3 py-1 bg-black/20 backdrop-blur-xs rounded-full text-white/90 text-xs font-semibold">
+              {/* Header Cover Bar (Sticky Top) */}
+              <div className="bg-gradient-to-r from-teal-900 via-teal-800 to-emerald-800 px-6 py-4 flex items-center justify-between shrink-0 shadow-md">
+                <div className="flex items-center gap-2 px-3 py-1 bg-black/25 backdrop-blur-xs rounded-full text-white text-xs font-semibold border border-white/10">
                   <User className="w-3.5 h-3.5 text-teal-300" />
                   <span>Expediente del Especialista</span>
                 </div>
@@ -1212,9 +1212,11 @@ Fecha de emisión: ${new Date().toLocaleDateString()}
               </div>
 
               {/* Profile Main Content */}
-              <div className="px-6 md:px-8 pb-6 relative flex-1 overflow-y-auto">
-                <div className="flex flex-col md:flex-row gap-5 items-start relative -mt-12 mb-6">
-                  <div className="w-24 h-24 md:w-28 md:h-28 rounded-2xl border-4 border-white dark:border-slate-900 shadow-xl bg-slate-100 dark:bg-slate-800 overflow-hidden shrink-0">
+              <div className="p-6 md:p-8 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
+                
+                {/* Profile Identity Card */}
+                <div className="flex flex-col sm:flex-row gap-5 items-start bg-slate-50 dark:bg-slate-800/60 p-5 rounded-3xl border border-slate-200/80 dark:border-slate-700/60">
+                  <div className="w-20 h-20 sm:w-24 sm:h-24 md:w-28 md:h-28 rounded-2xl border-2 border-teal-500/40 shadow-lg bg-slate-200 dark:bg-slate-800 overflow-hidden shrink-0">
                     <img 
                       src={selectedProfile.avatar} 
                       alt={selectedProfile.name} 
@@ -1223,7 +1225,7 @@ Fecha de emisión: ${new Date().toLocaleDateString()}
                     />
                   </div>
                   
-                  <div className="flex-1 min-w-0 pt-2 sm:pt-3 w-full">
+                  <div className="flex-1 min-w-0 w-full">
                     <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                       <div className="min-w-0">
                         <h2 className="text-xl sm:text-2xl font-black text-slate-800 dark:text-white flex items-center gap-2">
@@ -1251,7 +1253,7 @@ Fecha de emisión: ${new Date().toLocaleDateString()}
                             setSelectedProfile(null);
                             handleOpenMessage(prof);
                           }}
-                          className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl font-bold text-xs flex items-center gap-2 transition-all shadow-xs cursor-pointer whitespace-nowrap"
+                          className="px-4 py-2.5 bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl font-bold text-xs flex items-center gap-2 transition-all shadow-xs border border-slate-200 dark:border-slate-700 cursor-pointer whitespace-nowrap"
                         >
                           <MessageSquare className="w-4 h-4 text-teal-500" /> Mensaje
                         </button>

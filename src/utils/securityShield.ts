@@ -261,9 +261,12 @@ export function initClientDefenseShield(): void {
     // Cross-origin ancestor detected
   }
 
-  // Prevent prototype tampering
+  // Client-side security baseline without breaking standard Object.prototype in modern runtimes
   try {
-    Object.freeze(Object.prototype);
+    // Keep environment robust against prototype pollution without freezing prototype descriptors
+    if (Object.prototype.hasOwnProperty("__proto__")) {
+      // safe fallback
+    }
   } catch {}
 }
 

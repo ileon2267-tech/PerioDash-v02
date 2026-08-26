@@ -149,26 +149,24 @@ export default function TwoFactorAuthStep({
     setIsVerifying(true);
     setError(null);
 
-    setTimeout(() => {
-      if (timeLeft <= 0) {
-        setIsVerifying(false);
-        setError("El código de seguridad ha expirado. Solicite un nuevo código.");
-        return;
-      }
+    if (timeLeft <= 0) {
+      setIsVerifying(false);
+      setError("El código de seguridad ha expirado. Solicite un nuevo código.");
+      return;
+    }
 
-      if (codeToTest === currentOtp) {
-        setIsVerifying(false);
-        if (trustDevice) {
-          localStorage.setItem(`2fa_trusted_${user.email}`, "true");
-        }
-        onVerifySuccess();
-      } else {
-        setIsVerifying(false);
-        setError("Código de seguridad incorrecto. Intente nuevamente.");
-        setDigits(["", "", "", "", "", ""]);
-        inputRefs.current[0]?.focus();
+    if (codeToTest === currentOtp) {
+      setIsVerifying(false);
+      if (trustDevice) {
+        localStorage.setItem(`2fa_trusted_${user.email}`, "true");
       }
-    }, 400);
+      onVerifySuccess();
+    } else {
+      setIsVerifying(false);
+      setError("Código de seguridad incorrecto. Intente nuevamente.");
+      setDigits(["", "", "", "", "", ""]);
+      inputRefs.current[0]?.focus();
+    }
   };
 
   const isComplete = digits.every(d => d !== "");

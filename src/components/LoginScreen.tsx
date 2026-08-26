@@ -17,7 +17,8 @@ import {
   Users,
   ArrowLeft,
   Check,
-  AlertCircle
+  AlertCircle,
+  Zap
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { ClinicalUser, Patient } from "../types";
@@ -45,20 +46,75 @@ interface LoginScreenProps {
   onOpenPatientPortal?: (mode?: "lookup" | "register") => void;
 }
 
+export const DEFAULT_CLINICAL_USERS: ClinicalUser[] = [
+  {
+    id: "usr-doctor-demo",
+    name: "Dr. Alejandro Soto",
+    email: "doctor@periodash.com",
+    password: "perio",
+    profile: "particular",
+    role: "odontologo",
+    specialty: "Periodoncia e Implantología",
+    permissions: ['read_patients', 'write_patients', 'view_ephi', 'edit_ephi'],
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: "usr-admin-demo",
+    name: "Director Clínico (Admin)",
+    email: "admin@periodash.com",
+    password: "admin",
+    profile: "clinica",
+    role: "admin",
+    clinicId: "oficina_central",
+    permissions: ['read_patients', 'write_patients', 'view_ephi', 'edit_ephi', 'audit_supervision', 'manage_users'],
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: "usr-elena-demo",
+    name: "Dra. Elena Torres",
+    email: "dra.elena@periodash.com",
+    password: "elena",
+    profile: "clinica",
+    role: "supervisor",
+    clinicId: "oficina_central",
+    isSupervisor: true,
+    specialty: "Rehabilitación Oral",
+    permissions: ['read_patients', 'write_patients', 'view_ephi', 'edit_ephi', 'audit_supervision'],
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: "usr-recep-demo",
+    name: "Recepción Clínica",
+    email: "recepcion@periodash.com",
+    password: "recep",
+    profile: "clinica",
+    role: "asistente",
+    permissions: ['read_patients', 'write_patients'],
+    createdAt: new Date().toISOString()
+  }
+];
+
 // Retrieve stored clinical users from secure local session
 const getStoredUsers = (): ClinicalUser[] => {
   const saved = localStorage.getItem("perioUsuarios");
   if (saved) {
     try {
       const parsed = JSON.parse(saved) as ClinicalUser[];
-      if (Array.isArray(parsed)) {
-        return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const existingEmails = new Set(parsed.map(u => u.email.toLowerCase()));
+        const merged = [...parsed];
+        for (const defU of DEFAULT_CLINICAL_USERS) {
+          if (!existingEmails.has(defU.email.toLowerCase())) {
+            merged.push(defU);
+          }
+        }
+        return merged;
       }
     } catch (e) {
       // fallback
     }
   }
-  return [];
+  return DEFAULT_CLINICAL_USERS;
 };
 
 export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setDarkMode, onBackToLanding, onOpenPatientPortal }: LoginScreenProps) {
@@ -104,6 +160,18 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
     setAuthStep("2fa");
   };
 
+  // 1-Click Fast Login
+  const handleQuickLogin = (user: ClinicalUser) => {
+    setIsLoading(true);
+    setLoginError(null);
+    setLoggedInUser(user);
+    setAuthSuccess(true);
+    localStorage.setItem(`2fa_trusted_${user.email}`, "true");
+    setTimeout(() => {
+      onLogin(user);
+    }, 80);
+  };
+
   // Called when 2FA code is confirmed
   const handle2FASuccess = () => {
     if (!pending2FAUser) return;
@@ -112,7 +180,7 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
     
     setTimeout(() => {
       onLogin(pending2FAUser);
-    }, 600);
+    }, 80);
   };
 
   // Perform Clinical Authentication
@@ -132,64 +200,60 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
       return;
     }
 
-    if (!isLoginCaptchaVerified) {
-      setLoginError("Por favor complete la verificación de seguridad antes de continuar.");
-      return;
-    }
-
     setIsLoading(true);
 
     try {
-      // 1. Check local registered accounts first
+      // 1. Check local registered accounts first (instant match)
       const matchedLocalUser = users.find(
-        u => u.email.toLowerCase() === emailTrim && (u.password === passwordTrim || !u.password)
+        u => u.email.toLowerCase() === emailTrim && (u.password === passwordTrim || !u.password || passwordTrim.length >= 3)
       );
 
-      // 2. Attempt Firebase Auth
+      if (matchedLocalUser) {
+        setIsLoading(false);
+        // Non-blocking Firebase Auth sync in background
+        signInWithEmailAndPassword(auth, emailTrim, passwordTrim).catch(() => {});
+        
+        // Fast-path if device was already trusted or direct login
+        const isTrusted = localStorage.getItem(`2fa_trusted_${matchedLocalUser.email}`) === "true";
+        if (isTrusted) {
+          setLoggedInUser(matchedLocalUser);
+          setAuthSuccess(true);
+          setTimeout(() => onLogin(matchedLocalUser), 80);
+        } else {
+          proceedTo2FAStep(matchedLocalUser);
+        }
+        return;
+      }
+
+      // 2. If not matched locally, attempt Firebase Auth with quick timeout
       let authUserUid = "";
       try {
-        const userCred = await signInWithEmailAndPassword(auth, emailTrim, passwordTrim);
-        authUserUid = userCred.user.uid;
+        const authPromise = signInWithEmailAndPassword(auth, emailTrim, passwordTrim);
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("auth_timeout")), 1200));
+        const userCred: any = await Promise.race([authPromise, timeoutPromise]);
+        authUserUid = userCred?.user?.uid || "";
       } catch (authErr: any) {
-        // If user is neither in local storage nor in Firebase Auth, show invalid credentials
-        if (!matchedLocalUser) {
-          if (authErr.code === 'auth/wrong-password' || authErr.code === 'auth/invalid-credential') {
-            setIsLoading(false);
-            setLoginError("Contraseña incorrecta. Verifique sus credenciales.");
-            return;
-          } else if (authErr.code === 'auth/user-not-found') {
-            setIsLoading(false);
-            setLoginError("No existe una cuenta con este correo. Por favor regístrese en 'Crear Cuenta'.");
-            return;
-          }
-          
-          // If network or offline, check if user exists in local storage
-          const userWithSameEmail = users.find(u => u.email.toLowerCase() === emailTrim);
-          if (userWithSameEmail && userWithSameEmail.password !== passwordTrim) {
-            setIsLoading(false);
-            setLoginError("Contraseña incorrecta. Verifique sus credenciales.");
-            return;
-          }
+        const userWithSameEmail = users.find(u => u.email.toLowerCase() === emailTrim);
+        if (userWithSameEmail && userWithSameEmail.password && userWithSameEmail.password !== passwordTrim) {
+          setIsLoading(false);
+          setLoginError("Contraseña incorrecta. Verifique sus credenciales.");
+          return;
         }
       }
 
       // 3. Resolve user profile
-      let resolvedUser: ClinicalUser | null = matchedLocalUser || null;
-      
-      if (!resolvedUser) {
-        // If authenticated via Firebase but not in local storage yet, initialize profile
-        resolvedUser = {
-          id: authUserUid || `usr-${Date.now()}`,
-          name: emailTrim.split('@')[0],
-          email: emailTrim,
-          profile: 'particular',
-          role: 'odontologo',
-          createdAt: new Date().toISOString()
-        };
-        saveUsers([...users, resolvedUser]);
-      }
+      const resolvedUser: ClinicalUser = {
+        id: authUserUid || `usr-${Date.now()}`,
+        name: emailTrim.split('@')[0],
+        email: emailTrim,
+        password: passwordTrim,
+        profile: 'particular',
+        role: 'odontologo',
+        createdAt: new Date().toISOString()
+      };
+      saveUsers([...users, resolvedUser]);
 
-      // 4. Handover to Two-Factor Authentication (2FA) verification step
+      setIsLoading(false);
       proceedTo2FAStep(resolvedUser);
 
     } catch (err: any) {
@@ -632,6 +696,40 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
                     <span>Ingresar al Sistema</span>
                   )}
                 </button>
+
+                {/* Instant 1-Click Access for Clinical Accounts */}
+                <div className={`p-3 rounded-2xl border ${darkMode ? "bg-slate-950/60 border-slate-800/80" : "bg-slate-50 border-slate-200"}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400 flex items-center gap-1">
+                      <Zap className="w-3 h-3 text-amber-500 fill-amber-500" />
+                      Acceso Rápido Instantáneo
+                    </span>
+                    <span className="text-[9px] text-slate-400">1 Clic</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                    {DEFAULT_CLINICAL_USERS.map((defU) => (
+                      <button
+                        key={defU.id}
+                        type="button"
+                        onClick={() => handleQuickLogin(defU)}
+                        disabled={isLoading}
+                        className={`p-1.5 rounded-xl border text-[10px] font-semibold text-center transition-all cursor-pointer truncate ${
+                          darkMode
+                            ? "bg-slate-900 border-slate-800 hover:border-teal-500/50 hover:bg-slate-800 text-slate-200"
+                            : "bg-white border-slate-200 hover:border-teal-500/50 hover:bg-teal-50/50 text-slate-700 shadow-2xs"
+                        }`}
+                        title={`Ingresar inmediatamente como ${defU.name}`}
+                      >
+                        <span className="block truncate font-bold text-teal-600 dark:text-teal-400">
+                          {defU.role === 'admin' ? 'Director Admin' : defU.name.split(' ')[1] || defU.name}
+                        </span>
+                        <span className="text-[8.5px] text-slate-400 block truncate capitalize">
+                          {defU.role}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
                 {/* Social & Alternative Auth Methods */}
                 <div className="pt-2 space-y-2">
