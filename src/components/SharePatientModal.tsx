@@ -3,6 +3,7 @@ import { Copy, Link as LinkIcon, X, CheckCircle2, Send, ExternalLink, Smartphone
 import { Patient } from "../types";
 import { motion } from "motion/react";
 import { recordHipaaAudit } from "../utils/hipaaAudit";
+import { copyToClipboardSafely } from "../utils/safeClipboard";
 
 interface SharePatientModalProps {
   patient: Patient;
@@ -15,8 +16,8 @@ export default function SharePatientModal({ patient, onClose }: SharePatientModa
   // Real dynamic link pointing to the External Patient Portal
   const shareUrl = `${window.location.origin}/?portal_patient=${encodeURIComponent(patient.id)}`;
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(shareUrl);
+  const handleCopy = async () => {
+    await copyToClipboardSafely(shareUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
 

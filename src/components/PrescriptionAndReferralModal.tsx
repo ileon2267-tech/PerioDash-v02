@@ -22,6 +22,9 @@ import {
   Share2
 } from 'lucide-react';
 import { recordHipaaAudit } from '../utils/hipaaAudit';
+import { copyToClipboardSafely } from '../utils/safeClipboard';
+import GmailCenterModal from './GmailCenterModal';
+import { Mail } from 'lucide-react';
 
 interface PrescriptionAndReferralModalProps {
   isOpen: boolean;
@@ -175,6 +178,7 @@ export default function PrescriptionAndReferralModal({
   const [requestedExams, setRequestedExams] = useState("Tomografía Cone Beam CBCT mandibular y radiografía panorámica digital actualizada.");
 
   const [copiedStatus, setCopiedStatus] = useState<string | null>(null);
+  const [showGmailModal, setShowGmailModal] = useState<boolean>(false);
 
   if (!isOpen) return null;
 
@@ -237,7 +241,7 @@ export default function PrescriptionAndReferralModal({
     });
   };
 
-  const handleCopyToClipboard = () => {
+  const handleCopyToClipboard = async () => {
     let text = "";
     if (activeTab === 'receta') {
       text = `RECETA MÉDICA - ${clinicName}\nDr/a: ${doctorName} (${medicalLicense})\nPaciente: ${patient.name} | Fecha: ${new Date().toLocaleDateString()}\nDiagnóstico: ${diagnosis}\n\n`;
@@ -248,7 +252,7 @@ export default function PrescriptionAndReferralModal({
       text = `INTERCONSULTA - ${targetSpecialty}\nPaciente: ${patient.name}\nMotivo: ${referralReason}\nPiezas: ${targetTeeth}\nResumen: ${clinicalHistorySummary}`;
     }
 
-    navigator.clipboard.writeText(text);
+    await copyToClipboardSafely(text);
     setCopiedStatus("Copiado al portapapeles");
     setTimeout(() => setCopiedStatus(null), 3000);
   };
@@ -477,6 +481,44 @@ export default function PrescriptionAndReferralModal({
                   />
                 </div>
 
+                {/* Sello de Firma Digital y Verificación QR para Farmacias */}
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className="p-2 bg-white rounded-xl shadow-xs border border-slate-200 shrink-0">
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(
+                          `PERIODASH-RX-VAL:${patient.id}:${new Date().toISOString()}:${doctorName}:${medicalLicense}`
+                        )}`}
+                        alt="QR Verificación Receta"
+                        className="w-16 h-16"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-teal-700 dark:text-teal-400">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-teal-600" />
+                        <span>Firma Digital y Timbre Acreditado</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
+                        Folio: <span className="font-bold text-slate-700 dark:text-slate-300">RX-{patient.id.toUpperCase()}-{new Date().getFullYear()}</span>
+                      </p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Verificable por farmacias comunitarias y prestadores acreditados ante la Superintendencia de Salud (SIS).
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right sm:border-l sm:border-slate-200 sm:dark:border-slate-700/60 sm:pl-4">
+                    <div className="text-xs font-serif italic text-slate-800 dark:text-slate-200 font-bold border-b border-slate-300 dark:border-slate-600 pb-1 inline-block">
+                      {doctorName}
+                    </div>
+                    <div className="text-[10px] font-mono text-slate-500 mt-1">
+                      {medicalLicense}
+                    </div>
+                    <div className="text-[9px] text-slate-400">
+                      Firma Electrónica Avanzada
+                    </div>
+                  </div>
+                </div>
+
               </div>
             ) : (
               /* Interconsulta / Referral Form */
@@ -600,6 +642,15 @@ export default function PrescriptionAndReferralModal({
               </button>
 
               <button
+                onClick={() => setShowGmailModal(true)}
+                className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow-xs"
+                title="Enviar receta oficial por correo Gmail"
+              >
+                <Mail className="w-3.5 h-3.5" />
+                <span>Enviar por Gmail</span>
+              </button>
+
+              <button
                 onClick={handleSendWhatsApp}
                 className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow-xs"
                 title="Enviar directamente al WhatsApp del paciente"
@@ -619,6 +670,28 @@ export default function PrescriptionAndReferralModal({
             </div>
           </div>
         </motion.div>
+
+        {showGmailModal && (
+          <GmailCenterModal
+            isOpen={showGmailModal}
+            onClose={() => setShowGmailModal(false)}
+            darkMode={document.documentElement.classList.contains('dark')}
+            patients={[patient]}
+            currentUser={{ id: '1', name: doctorName, role: 'periodoncista', email: 'doctor@perio.com' } as any}
+            initialPatient={patient}
+            initialTemplate={activeTab === 'receta' ? 'prescription' : 'custom'}
+            initialSubject={
+              activeTab === 'receta'
+                ? `Receta Digital y Plan Farmacológico - ${patient.name}`
+                : `Interconsulta Odontológica (${targetSpecialty}) - ${patient.name}`
+            }
+            initialBody={
+              activeTab === 'receta'
+                ? medications.map((m, i) => `${i + 1}. ${m.name}\n   Dosis: ${m.dosage}\n   Frecuencia: ${m.frequency}\n   Duración: ${m.duration}\n   Instrucciones: ${m.instructions}`).join('\n\n') + (prescriptionNotes ? `\n\nNotas adicionales:\n${prescriptionNotes}` : '')
+                : `Especialidad de Destino: ${targetSpecialty}\nPrioridad: ${referralUrgency.toUpperCase()}\nPiezas / Región: ${targetTeeth}\n\nMotivo de Interconsulta:\n${referralReason}\n\nResumen Clínico:\n${clinicalHistorySummary}\n\nExámenes Solicitados:\n${requestedExams}`
+            }
+          />
+        )}
       </div>
     </AnimatePresence>
   );

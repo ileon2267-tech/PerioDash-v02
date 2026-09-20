@@ -1,27 +1,55 @@
 import React, { useState, useEffect } from "react";
 import { Patient, TreatmentProcedure, TreatmentPlan, PaymentTransaction } from "../types";
-import { Banknote, CheckCircle, Circle, Calculator, Percent, CreditCard, ChevronRight, Plus, Trash2, Receipt, ArrowDownRight, ShieldCheck } from "lucide-react";
+import { 
+  Banknote, 
+  CheckCircle, 
+  Circle, 
+  Calculator, 
+  Percent, 
+  CreditCard, 
+  ChevronRight, 
+  Plus, 
+  Trash2, 
+  Receipt, 
+  ArrowDownRight, 
+  ShieldCheck,
+  DollarSign,
+  Award,
+  Boxes,
+  Zap,
+  ExternalLink
+} from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { DENTITO_APP_URL } from "../services/dentitoFinanceSync";
 import PaymentGatewayModal from "./PaymentGatewayModal";
+import DailyCashRegister from "./DailyCashRegister";
+import DoctorCommissions from "./DoctorCommissions";
+import ClinicalSuppliesInventory from "./ClinicalSuppliesInventory";
 
 interface FinanceModuleProps {
   activePatient: Patient | null;
   setPatients: React.Dispatch<React.SetStateAction<Patient[]>>;
   aranceles?: Record<string, number>;
+  patients?: Patient[];
+  doctorName?: string;
+  onSelectPatient?: (patientId: string) => void;
 }
 
-export default function FinanceModule({ activePatient, setPatients, aranceles }: FinanceModuleProps) {
-  if (!activePatient) {
-    return (
-      <div className="flex flex-col items-center justify-center p-12 text-slate-500 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800">
-        <Banknote className="w-12 h-12 mb-4 text-slate-300 dark:text-slate-700" />
-        <h3 className="text-xl font-bold font-display">Sin Paciente Activo</h3>
-        <p className="text-sm">Seleccione un paciente para ver su plan de tratamiento y finanzas.</p>
-      </div>
-    );
-  }
+type FinanceSubTab = "presupuesto" | "caja" | "liquidaciones" | "insumos";
 
-  const plan: TreatmentPlan = activePatient.treatmentPlan || { procedures: [], financing: { months: 12, downPayment: 0, interestRate: 15 } };
+export default function FinanceModule({ 
+  activePatient, 
+  setPatients, 
+  aranceles,
+  patients = [],
+  doctorName = "Dr. Ignacio León",
+  onSelectPatient
+}: FinanceModuleProps) {
+  const [activeSubTab, setActiveSubTab] = useState<FinanceSubTab>(() => {
+    return activePatient ? "presupuesto" : "caja";
+  });
+
+  const plan: TreatmentPlan = activePatient?.treatmentPlan || { procedures: [], financing: { months: 12, downPayment: 0, interestRate: 15 } };
   
   const [newDesc, setNewDesc] = useState("");
   const [newCost, setNewCost] = useState("");
@@ -48,10 +76,12 @@ export default function FinanceModule({ activePatient, setPatients, aranceles }:
   const installment = calculateInstallment();
 
   const handleUpdatePlan = (newPlan: TreatmentPlan) => {
+    if (!activePatient) return;
     setPatients(prev => prev.map(p => p.id === activePatient.id ? { ...p, treatmentPlan: newPlan } : p));
   };
 
   const handleApproveContract = () => {
+    if (!activePatient) return;
     const newEvolution = {
       id: `evo-fin-${Date.now()}`,
       date: new Date().toLocaleDateString("es-ES"),
@@ -77,7 +107,7 @@ export default function FinanceModule({ activePatient, setPatients, aranceles }:
   };
 
   const handleAddProcedure = () => {
-    if (!newDesc.trim() || !newCost) return;
+    if (!newDesc.trim() || !newCost || !activePatient) return;
     const costNum = parseFloat(newCost);
     if (isNaN(costNum)) return;
 
@@ -98,6 +128,7 @@ export default function FinanceModule({ activePatient, setPatients, aranceles }:
   };
 
   const toggleStatus = (procId: string) => {
+    if (!activePatient) return;
     handleUpdatePlan({
       ...plan,
       procedures: plan.procedures.map(p => p.id === procId ? { ...p, completed: !p.completed } : p)
@@ -105,6 +136,7 @@ export default function FinanceModule({ activePatient, setPatients, aranceles }:
   };
 
   const deleteProcedure = (procId: string) => {
+    if (!activePatient) return;
     handleUpdatePlan({
       ...plan,
       procedures: plan.procedures.filter(p => p.id !== procId)
@@ -119,7 +151,7 @@ export default function FinanceModule({ activePatient, setPatients, aranceles }:
       setDown(f?.downPayment ?? 0);
       setRate(f?.interestRate ?? 15);
     }
-  }, [activePatient.id]);
+  }, [activePatient?.id]);
 
   useEffect(() => {
     if (activePatient) {
@@ -141,11 +173,12 @@ export default function FinanceModule({ activePatient, setPatients, aranceles }:
   const [selectedPayAmount, setSelectedPayAmount] = useState<number>(50000);
   const [selectedPayConcept, setSelectedPayConcept] = useState<string>("Abono Tratamiento Odontológico");
 
-  const patientPayments: PaymentTransaction[] = activePatient.payments || [];
+  const patientPayments: PaymentTransaction[] = activePatient?.payments || [];
   const totalPaid = patientPayments.reduce((acc, tx) => acc + (tx.status === "completed" ? tx.amount : 0), 0);
   const realBalance = Math.max(0, totalCost - totalPaid);
 
   const handlePaymentSuccess = (tx: PaymentTransaction) => {
+    if (!activePatient) return;
     const updatedPayments = [tx, ...patientPayments];
     
     // Also record in medical evolutions as official payment receipt
@@ -163,286 +196,446 @@ export default function FinanceModule({ activePatient, setPatients, aranceles }:
     } : p));
   };
 
+  const handleAddPaymentFromCashRegister = (patientId: string, tx: PaymentTransaction) => {
+    setPatients(prev => prev.map(p => {
+      if (p.id === patientId) {
+        const pPayments = p.payments || [];
+        const paymentEvolution = {
+          id: `evo-pay-${Date.now()}`,
+          date: new Date().toLocaleDateString("es-ES"),
+          description: `💵 COBRO EN CAJA / POS:\n- Comprobante: ${tx.receiptNumber}\n- Monto: $${tx.amount.toLocaleString("es-CL")} CLP\n- Medio: ${tx.method.toUpperCase()}\n- Concepto: ${tx.concept}`,
+          professional: "Caja Central"
+        };
+        return {
+          ...p,
+          payments: [tx, ...pPayments],
+          evolutions: [paymentEvolution, ...(p.evolutions || [])]
+        };
+      }
+      return p;
+    }));
+  };
+
+  const patientsList = patients.length > 0 ? patients : (activePatient ? [activePatient] : []);
+
   return (
     <div className="space-y-6">
-      
-      {/* Header with Payment Trigger */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-xs">
-        <div>
-          <h2 className="text-2xl font-display font-bold text-slate-900 dark:text-white flex items-center gap-3">
-             <Banknote className="w-7 h-7 text-teal-600 dark:text-teal-400" /> Plan Financiero & Pagos
-          </h2>
-          <p className="text-sm text-slate-500 font-mono mt-1 flex items-center gap-2 flex-wrap">
-            <span>Paciente: <span className="font-bold text-slate-800 dark:text-slate-200">{activePatient.name}</span></span>
-            {activePatient.rut && (
-              <span className="px-2 py-0.5 rounded bg-teal-500/10 text-teal-700 dark:text-teal-300 font-mono text-xs font-bold border border-teal-500/20">
-                RUT: {activePatient.rut}
-              </span>
-            )}
-          </p>
-        </div>
+      {/* Sub-Tabs Nav */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-2 flex items-center gap-2 overflow-x-auto shadow-xs">
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("presupuesto")}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeSubTab === "presupuesto"
+              ? "bg-teal-600 text-white shadow-sm"
+              : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+          }`}
+        >
+          <Banknote className="w-4 h-4" />
+          Plan & Presupuesto Paciente
+        </button>
 
-        <div className="flex items-center gap-3 w-full sm:w-auto">
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedPayAmount(realBalance > 0 ? realBalance : 50000);
-              setSelectedPayConcept(`Abono a Tratamiento - ${activePatient.name}`);
-              setIsPaymentModalOpen(true);
-            }}
-            className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white font-black text-xs rounded-xl shadow-lg shadow-teal-500/20 flex items-center justify-center gap-2 cursor-pointer transition-all"
-          >
-            <CreditCard className="w-4 h-4" />
-            Recibir Abono / Pasarela de Pago
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("caja")}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeSubTab === "caja"
+              ? "bg-teal-600 text-white shadow-sm"
+              : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+          }`}
+        >
+          <DollarSign className="w-4 h-4" />
+          Caja Diaria & Cuadratura POS
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("liquidaciones")}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeSubTab === "liquidaciones"
+              ? "bg-teal-600 text-white shadow-sm"
+              : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+          }`}
+        >
+          <Award className="w-4 h-4" />
+          Liquidación de Honorarios Médicos
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("insumos")}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeSubTab === "insumos"
+              ? "bg-teal-600 text-white shadow-sm"
+              : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+          }`}
+        >
+          <Boxes className="w-4 h-4" />
+          Insumos & Stock Clínico
+        </button>
+
+        {/* Direct Shortcut to Dentito Finance */}
+        <a
+          href={DENTITO_APP_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-auto px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap bg-gradient-to-r from-amber-500/10 to-teal-500/10 hover:from-amber-500/20 hover:to-teal-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 shadow-xs group cursor-pointer"
+          title="Abrir Dentito Finance en una nueva pestaña"
+        >
+          <Zap className="w-3.5 h-3.5 text-amber-500 group-hover:scale-110 transition-transform" />
+          <span>Dentito Finance</span>
+          <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-amber-500" />
+        </a>
       </div>
 
-      {/* Summary Financial Highlights */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-xs">
-          <span className="text-xs text-slate-500 dark:text-slate-400 block font-bold">Presupuesto Total:</span>
-          <span className="text-xl font-black font-mono text-slate-900 dark:text-white">${totalCost.toLocaleString("es-CL")} CLP</span>
-        </div>
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-emerald-500/20 shadow-xs">
-          <span className="text-xs text-emerald-600 dark:text-emerald-400 block font-bold">Total Pagado / Abonado:</span>
-          <span className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400">${totalPaid.toLocaleString("es-CL")} CLP</span>
-        </div>
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-amber-500/20 shadow-xs">
-          <span className="text-xs text-amber-600 dark:text-amber-400 block font-bold">Saldo Pendiente:</span>
-          <span className="text-xl font-black font-mono text-amber-600 dark:text-amber-300">${realBalance.toLocaleString("es-CL")} CLP</span>
-        </div>
-      </div>
+      {/* Sub-Tab: Caja Diaria */}
+      {activeSubTab === "caja" && (
+        <DailyCashRegister 
+          patients={patientsList} 
+          onAddPaymentToPatient={handleAddPaymentFromCashRegister}
+          currentUser={doctorName}
+        />
+      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        
-        {/* Treatment Plan List */}
-        <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-xs border border-slate-100 dark:border-slate-800 space-y-5">
-           <h3 className="font-bold text-lg border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center justify-between">
-              Procedimientos
-              <span className="text-xs bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full text-slate-700 dark:text-slate-300 font-mono">
-                ${completedCost.toLocaleString("es-CL")} / ${totalCost.toLocaleString("es-CL")} CLP
-              </span>
-           </h3>
+      {/* Sub-Tab: Liquidación de Médicos */}
+      {activeSubTab === "liquidaciones" && (
+        <DoctorCommissions patients={patientsList} />
+      )}
 
-            {aranceles && (
-              <div className="flex flex-col md:flex-row items-center gap-2 p-3 bg-teal-500/5 rounded-xl border border-teal-500/10 mb-2">
-                <span className="text-[10px] font-black uppercase tracking-wide text-teal-600 dark:text-teal-400 shrink-0">Presupuesto Rápido (Arancel):</span>
-                <select
-                  onChange={(e) => {
-                    const selected = e.target.value;
-                    if (selected && aranceles[selected] !== undefined) {
-                      setNewDesc(selected);
-                      setNewCost(aranceles[selected].toString());
-                    }
-                  }}
-                  className="flex-1 bg-white dark:bg-slate-800 text-xs px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 outline-none text-slate-700 dark:text-slate-300"
-                  defaultValue=""
-                >
-                  <option value="" disabled>-- Seleccione Arancel Preconfigurado --</option>
-                  {Object.entries(aranceles).map(([name, price]) => (
-                    <option key={name} value={name}>{name} (${price.toLocaleString("es-CL")} CLP)</option>
+      {/* Sub-Tab: Insumos y Stock */}
+      {activeSubTab === "insumos" && (
+        <ClinicalSuppliesInventory />
+      )}
+
+      {/* Sub-Tab: Presupuesto del Paciente */}
+      {activeSubTab === "presupuesto" && (
+        <>
+          {!activePatient ? (
+            <div className="flex flex-col items-center justify-center p-12 text-slate-500 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800">
+              <Banknote className="w-12 h-12 mb-4 text-slate-300 dark:text-slate-700" />
+              <h3 className="text-xl font-bold font-display text-slate-800 dark:text-slate-200">Sin Paciente Seleccionado</h3>
+              <p className="text-sm mt-1 mb-4">Seleccione un paciente para ver su plan de tratamiento y emitir presupuestos o cuotas.</p>
+              {patients.length > 0 && onSelectPatient && (
+                <div className="flex flex-wrap gap-2 justify-center max-w-md">
+                  {patients.slice(0, 4).map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => onSelectPatient(p.id)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-teal-50 dark:hover:bg-teal-950/40 text-xs font-bold text-slate-700 dark:text-slate-300 hover:text-teal-600 transition-all cursor-pointer"
+                    >
+                      {p.name}
+                    </button>
                   ))}
-                </select>
-              </div>
-            )}
-
-            <div className="flex gap-2 text-sm text-slate-600 dark:text-slate-300 flex-col md:flex-row">
-              <input type="text" placeholder="Tratamiento..." value={newDesc} onChange={e => setNewDesc(e.target.value)} className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-800 border-none rounded-lg outline-none text-xs" />
-              <select value={newPhase} onChange={e => setNewPhase(e.target.value as any)} className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border-none rounded-lg outline-none text-xs">
-                <option value="Diagnostico">Diagnóstico</option>
-                <option value="Saneamiento">Saneamiento</option>
-                <option value="Rehabilitacion">Rehabilitación</option>
-                <option value="Mantenimiento">Mantenimiento</option>
-              </select>
-              <input type="number" placeholder="Costo " value={newCost} onChange={e => setNewCost(e.target.value)} className="w-24 px-3 py-2 bg-slate-50 dark:bg-slate-800 border-none rounded-lg outline-none text-xs" />
-              <button onClick={handleAddProcedure} className="bg-teal-600 hover:bg-teal-700 text-white p-2 rounded-lg cursor-pointer transition-colors"><Plus className="w-5 h-5"/></button>
+                </div>
+              )}
             </div>
-
-           <div className="space-y-4 pt-4 h-64 overflow-y-auto pr-2">
-             {["Diagnostico", "Saneamiento", "Rehabilitacion", "Mantenimiento"].map(phase => {
-               const procs = plan.procedures.filter(p => p.phase === phase);
-               if(procs.length === 0) return null;
-               return (
-                 <div key={phase}>
-                    <h4 className="text-xs font-bold uppercase text-teal-600 dark:text-teal-400 mb-2">{phase}</h4>
-                    <div className="space-y-2">
-                      {procs.map(proc => (
-                        <div key={proc.id} className={`flex items-center justify-between p-3 rounded-xl border ${proc.completed ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-900/10 dark:border-emerald-800/40 text-slate-500' : 'bg-white border-slate-200 dark:bg-slate-800 dark:border-slate-700'}`}>
-                           <div className="flex items-center gap-3">
-                             <button onClick={() => toggleStatus(proc.id)} className="cursor-pointer text-emerald-500 hover:text-emerald-700">
-                               {proc.completed ? <CheckCircle className="w-5 h-5" /> : <Circle className="w-5 h-5 text-slate-300 dark:text-slate-600" />}
-                             </button>
-                             <span className={`text-sm ${proc.completed ? 'line-through opacity-70' : 'font-semibold'}`}>{proc.description}</span>
-                           </div>
-                           <div className="flex items-center gap-4 border-l border-slate-200 dark:border-slate-700 pl-3">
-                             <span className="font-mono text-xs font-semibold text-slate-700 dark:text-slate-300">${proc.cost.toLocaleString("es-CL")} CLP</span>
-                             <button onClick={() => deleteProcedure(proc.id)} className="text-slate-305 hover:text-red-500 hover:scale-105 active:scale-95 duration-200 p-1 cursor-pointer transition-colors"><Trash2 className="w-4 h-4" /></button>
-                           </div>
-                        </div>
-                      ))}
-                    </div>
-                 </div>
-               )
-             })}
-           </div>
-        </div>
-
-        {/* Financial Simulator */}
-        <div className="bg-gradient-to-br from-slate-900 to-teal-800 p-6 rounded-2xl shadow-xl border border-slate-800 text-white flex flex-col justify-between">
-          <div>
-            <h3 className="font-bold text-lg flex items-center gap-2 mb-6 text-teal-300">
-              <Calculator className="w-5 h-5" /> Simulador de Financiamiento
-            </h3>
-
+          ) : (
             <div className="space-y-6">
-              {/* Controles deslizantes */}
-              <div>
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="text-slate-300">Pago Inicial (Enganche)</span>
-                  <span className="font-mono font-bold">${down.toLocaleString("es-CL")} CLP</span>
-                </div>
-                <input 
-                  type="range" min="0" max={totalCost} step="5000" value={down} 
-                  onChange={e => setDown(Number(e.target.value))} 
-                  className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-teal-500" 
-                />
-              </div>
-
-              <div>
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="text-slate-300">Plazo en Meses</span>
-                  <span className="font-mono font-bold">{months} meses</span>
-                </div>
-                <input 
-                  type="range" min="1" max="60" step="1" value={months} 
-                  onChange={e => setMonths(Number(e.target.value))} 
-                  className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-teal-500" 
-                />
-              </div>
-
-              <div>
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="text-slate-300 flex items-center gap-1"><Percent className="w-3.5 h-3.5"/> Tasa de Interés Anual</span>
-                  <span className="font-mono font-bold">{rate}%</span>
-                </div>
-                <input 
-                  type="range" min="0" max="30" step="0.5" value={rate} 
-                  onChange={e => setRate(Number(e.target.value))} 
-                  className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-teal-500" 
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-8 bg-black/30 p-5 rounded-2xl border border-white/10 backdrop-blur-md">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-slate-400 text-sm">Monto a Financiar</span>
-              <span className="font-mono text-lg">${Math.round(principal).toLocaleString("es-CL")} CLP</span>
-            </div>
-            <div className="h-px w-full bg-white/10 my-3"/>
-            <div className="flex justify-between items-end">
-              <span className="text-teal-300 text-sm font-semibold">Cuota Mensual Estimada</span>
-              <span className="font-mono text-4xl font-black">${Math.round(installment).toLocaleString("es-CL")} CLP</span>
-            </div>
-            {contractSuccess && (
-              <div className="text-[11px] font-bold text-center text-teal-300 bg-teal-900/40 p-2.5 rounded-xl border border-teal-500/20 mt-3 animate-pulse">
-                🎉 Contrato aprobado e inyectado con éxito en el Historial de Evoluciones Médicas.
-              </div>
-            )}
-            <button 
-              onClick={handleApproveContract}
-              disabled={contractSuccess || totalCost === 0}
-              className={`w-full mt-5 text-white font-bold py-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
-                contractSuccess 
-                  ? "bg-teal-800/20 text-slate-400 border border-teal-500/10 cursor-not-allowed"
-                  : totalCost === 0
-                  ? "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-50"
-                  : "bg-teal-600 hover:bg-teal-500 hover:scale-[1.01] active:scale-[0.99]"
-              }`}
-            >
-               <CreditCard className="w-5 h-5"/> {contractSuccess ? "Contrato Aprobado" : "Aprobar y Generar Contrato"}
-            </button>
-          </div>
-        </div>
-
-      </div>
-
-      {/* Transaction & Payment History Section */}
-      <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-xs border border-slate-100 dark:border-slate-800 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
-          <div>
-            <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <Receipt className="w-5 h-5 text-teal-600 dark:text-teal-400" />
-              Historial de Abonos & Pagos Registrados
-            </h3>
-            <p className="text-xs text-slate-500">Transacciones procesadas para este paciente en el sistema y pasarelas de pago.</p>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedPayAmount(realBalance > 0 ? realBalance : 35000);
-              setSelectedPayConcept(`Pago Abono - ${activePatient.name}`);
-              setIsPaymentModalOpen(true);
-            }}
-            className="px-3.5 py-2 bg-teal-50 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 border border-teal-200 dark:border-teal-500/30 rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-teal-100 cursor-pointer transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Registrar Nuevo Abono
-          </button>
-        </div>
-
-        {patientPayments.length === 0 ? (
-          <div className="p-8 text-center bg-slate-50 dark:bg-slate-950/60 rounded-2xl border border-slate-100 dark:border-slate-800/80 text-slate-400">
-            <CreditCard className="w-8 h-8 mx-auto text-slate-400 dark:text-slate-600 mb-2" />
-            <p className="text-xs font-medium">No se han registrado abonos ni transacciones previas para este paciente.</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 uppercase text-[10px] font-bold">
-                  <th className="pb-3">Comprobante</th>
-                  <th className="pb-3">Fecha</th>
-                  <th className="pb-3">Concepto</th>
-                  <th className="pb-3">Método / Pasarela</th>
-                  <th className="pb-3 text-right">Monto</th>
-                  <th className="pb-3 text-right">Estado</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                {patientPayments.map((tx) => (
-                  <tr key={tx.id} className="hover:bg-slate-50 dark:hover:bg-slate-950/40">
-                    <td className="py-3 font-mono font-bold text-teal-600 dark:text-teal-400">
-                      {tx.receiptNumber || tx.id.substring(0, 10)}
-                    </td>
-                    <td className="py-3 text-slate-500 dark:text-slate-400 font-mono">{tx.date}</td>
-                    <td className="py-3 font-medium text-slate-800 dark:text-slate-200">{tx.concept}</td>
-                    <td className="py-3">
-                      <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-[10px] font-bold uppercase text-slate-700 dark:text-slate-300">
-                        {tx.method} {tx.paymentGateway ? `• ${tx.paymentGateway}` : ""}
+              {/* Header with Payment Trigger */}
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-xs">
+                <div>
+                  <h2 className="text-2xl font-display font-bold text-slate-900 dark:text-white flex items-center gap-3">
+                     <Banknote className="w-7 h-7 text-teal-600 dark:text-teal-400" /> Plan Financiero & Pagos
+                  </h2>
+                  <p className="text-sm text-slate-500 font-mono mt-1 flex items-center gap-2 flex-wrap">
+                    <span>Paciente: <span className="font-bold text-slate-800 dark:text-slate-200">{activePatient.name}</span></span>
+                    {activePatient.rut && (
+                      <span className="px-2 py-0.5 rounded bg-teal-500/10 text-teal-700 dark:text-teal-300 font-mono text-xs font-bold border border-teal-500/20">
+                        RUT: {activePatient.rut}
                       </span>
-                    </td>
-                    <td className="py-3 text-right font-mono font-bold text-slate-900 dark:text-white">
-                      ${tx.amount.toLocaleString("es-CL")} CLP
-                    </td>
-                    <td className="py-3 text-right">
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                        Completado
+                    )}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedPayAmount(realBalance > 0 ? realBalance : 50000);
+                      setSelectedPayConcept(`Abono a Tratamiento - ${activePatient.name}`);
+                      setIsPaymentModalOpen(true);
+                    }}
+                    className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white font-black text-xs rounded-xl shadow-lg shadow-teal-500/20 flex items-center justify-center gap-2 cursor-pointer transition-all"
+                  >
+                    <CreditCard className="w-4 h-4" />
+                    Recibir Abono / Pasarela de Pago
+                  </button>
+                </div>
+              </div>
+
+              {/* Summary Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 shadow-xs">
+                  <span className="text-xs font-mono font-bold text-slate-400">COSTO TOTAL</span>
+                  <div className="text-2xl font-bold font-display text-slate-900 dark:text-white mt-2">
+                    ${Math.round(totalCost).toLocaleString("es-CL")} CLP
+                  </div>
+                  <span className="text-[11px] text-slate-500 font-mono">{plan.procedures.length} procedimientos</span>
+                </div>
+
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 shadow-xs">
+                  <span className="text-xs font-mono font-bold text-slate-400">ABONADO / PAGADO</span>
+                  <div className="text-2xl font-bold font-display text-emerald-600 dark:text-emerald-400 mt-2">
+                    ${Math.round(totalPaid).toLocaleString("es-CL")} CLP
+                  </div>
+                  <span className="text-[11px] text-emerald-600 font-mono">{patientPayments.filter(p => p.status === 'completed').length} pagos registrados</span>
+                </div>
+
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 shadow-xs">
+                  <span className="text-xs font-mono font-bold text-slate-400">SALDO PENDIENTE</span>
+                  <div className="text-2xl font-bold font-display text-rose-600 dark:text-rose-400 mt-2">
+                    ${Math.round(realBalance).toLocaleString("es-CL")} CLP
+                  </div>
+                  <span className="text-[11px] text-rose-500 font-mono">Por saldar</span>
+                </div>
+
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 shadow-xs">
+                  <span className="text-xs font-mono font-bold text-slate-400">CUOTA MENSUAL (SIM.)</span>
+                  <div className="text-2xl font-bold font-display text-teal-600 dark:text-teal-400 mt-2">
+                    ${Math.round(installment).toLocaleString("es-CL")} CLP
+                  </div>
+                  <span className="text-[11px] text-slate-500 font-mono">En {months} cuotas al {rate}%</span>
+                </div>
+              </div>
+
+              {/* Procedures and Simulator */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Procedures List */}
+                <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6 shadow-xs">
+                  <h3 className="text-lg font-display font-bold text-slate-900 dark:text-white mb-4">
+                    Procedimientos Planificados
+                  </h3>
+                  
+                  {/* Add procedure bar */}
+                  <div className="flex flex-col sm:flex-row gap-2 mb-6">
+                    <select
+                      value={newPhase}
+                      onChange={(e) => setNewPhase(e.target.value as any)}
+                      className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono"
+                    >
+                      <option value="Diagnostico">Diagnóstico</option>
+                      <option value="Saneamiento">Saneamiento</option>
+                      <option value="Rehabilitacion">Rehabilitación</option>
+                      <option value="Mantenimiento">Mantenimiento</option>
+                    </select>
+                    <input
+                      type="text"
+                      placeholder="Descripción de la prestación..."
+                      value={newDesc}
+                      onChange={(e) => setNewDesc(e.target.value)}
+                      className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                    />
+                    <input
+                      type="number"
+                      placeholder="Costo (CLP)"
+                      value={newCost}
+                      onChange={(e) => setNewCost(e.target.value)}
+                      className="w-28 px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddProcedure}
+                      className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" /> Añadir
+                    </button>
+                  </div>
+
+                  {/* Procedures table */}
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {plan.procedures.length === 0 ? (
+                      <div className="text-center py-8 text-slate-400 text-xs">
+                        No hay procedimientos registrados en el plan.
+                      </div>
+                    ) : (
+                      plan.procedures.map((proc) => (
+                        <div key={proc.id} className="py-3 flex items-center justify-between gap-3 text-xs">
+                          <div className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => toggleStatus(proc.id)}
+                              className={`p-1 rounded-lg transition-colors cursor-pointer ${
+                                proc.completed ? "text-emerald-500 bg-emerald-50 dark:bg-emerald-950/30" : "text-slate-300 hover:text-slate-500"
+                              }`}
+                            >
+                              {proc.completed ? <CheckCircle className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
+                            </button>
+                            <div>
+                              <span className="font-bold text-slate-800 dark:text-slate-200">{proc.description}</span>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                                  {proc.phase}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono font-bold text-slate-900 dark:text-white">
+                              ${proc.cost.toLocaleString("es-CL")} CLP
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => deleteProcedure(proc.id)}
+                              className="text-slate-300 hover:text-rose-500 p-1 cursor-pointer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Simulator Card */}
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6 shadow-xs flex flex-col justify-between">
+                  <div>
+                    <h3 className="text-lg font-display font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
+                      <Calculator className="w-5 h-5 text-teal-600 dark:text-teal-400" />
+                      Simulador de Cuotas
+                    </h3>
+                    <p className="text-xs text-slate-500 font-mono mb-4">
+                      Amortización francesa para tratamientos rehabilitadores o periodontales complejos.
+                    </p>
+
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex justify-between">
+                          <span>Plazo de Pago</span>
+                          <span className="font-mono text-teal-600">{months} Meses</span>
+                        </label>
+                        <input
+                          type="range"
+                          min="3"
+                          max="36"
+                          step="1"
+                          value={months}
+                          onChange={(e) => setMonths(Number(e.target.value))}
+                          className="w-full accent-teal-600 mt-1 cursor-pointer"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex justify-between">
+                          <span>Pie / Enganche (Abono)</span>
+                          <span className="font-mono text-teal-600">${down.toLocaleString("es-CL")} CLP</span>
+                        </label>
+                        <input
+                          type="range"
+                          min="0"
+                          max={totalCost}
+                          step="10000"
+                          value={down}
+                          onChange={(e) => setDown(Number(e.target.value))}
+                          className="w-full accent-teal-600 mt-1 cursor-pointer"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex justify-between">
+                          <span>Tasa Anual de Interés</span>
+                          <span className="font-mono text-teal-600">{rate}% EA</span>
+                        </label>
+                        <input
+                          type="range"
+                          min="0"
+                          max="30"
+                          step="0.5"
+                          value={rate}
+                          onChange={(e) => setRate(Number(e.target.value))}
+                          className="w-full accent-teal-600 mt-1 cursor-pointer"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-6 border-t border-slate-100 dark:border-slate-800 mt-6">
+                    <div className="text-center mb-4">
+                      <span className="text-[11px] text-slate-400 font-mono block">VALOR ESTIMADO DE CUOTA</span>
+                      <span className="text-2xl font-black font-display text-teal-600 dark:text-teal-400">
+                        ${Math.round(installment).toLocaleString("es-CL")} CLP
                       </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                      <span className="text-[10px] text-slate-500 font-mono block">/ mes por {months} meses</span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleApproveContract}
+                      className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-xl font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md"
+                    >
+                      <ShieldCheck className="w-4 h-4" />
+                      Guardar Acuerdo Financiero
+                    </button>
+
+                    {contractSuccess && (
+                      <p className="text-[11px] text-emerald-600 font-bold text-center mt-2 font-mono">
+                        ✓ Contrato guardado en la evolución clínica del paciente.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Historic Receipts / Payments Table */}
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6 shadow-xs">
+                <h3 className="text-lg font-display font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+                  <Receipt className="w-5 h-5 text-teal-600 dark:text-teal-400" />
+                  Historial de Abonos y Comprobantes
+                </h3>
+
+                {patientPayments.length === 0 ? (
+                  <div className="text-center py-8 text-slate-400 text-xs">
+                    No se han registrado abonos o comprobantes para este paciente.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 uppercase text-[10px] font-bold">
+                          <th className="pb-3">Comprobante</th>
+                          <th className="pb-3">Fecha</th>
+                          <th className="pb-3">Concepto</th>
+                          <th className="pb-3">Método / Pasarela</th>
+                          <th className="pb-3 text-right">Monto</th>
+                          <th className="pb-3 text-right">Estado</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                        {patientPayments.map((tx) => (
+                          <tr key={tx.id} className="hover:bg-slate-50 dark:hover:bg-slate-950/40">
+                            <td className="py-3 font-mono font-bold text-teal-600 dark:text-teal-400">
+                              {tx.receiptNumber || tx.id.substring(0, 10)}
+                            </td>
+                            <td className="py-3 text-slate-500 dark:text-slate-400 font-mono">{tx.date}</td>
+                            <td className="py-3 font-medium text-slate-800 dark:text-slate-200">{tx.concept}</td>
+                            <td className="py-3">
+                              <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-[10px] font-bold uppercase text-slate-700 dark:text-slate-300">
+                                {tx.method} {tx.paymentGateway ? `• ${tx.paymentGateway}` : ""}
+                              </span>
+                            </td>
+                            <td className="py-3 text-right font-mono font-bold text-slate-900 dark:text-white">
+                              ${tx.amount.toLocaleString("es-CL")} CLP
+                            </td>
+                            <td className="py-3 text-right">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                                Completado
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Payment Gateway Modal */}
       <AnimatePresence>
-        {isPaymentModalOpen && (
+        {isPaymentModalOpen && activePatient && (
           <PaymentGatewayModal
             patient={activePatient}
             initialAmount={selectedPayAmount}

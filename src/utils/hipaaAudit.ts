@@ -1,6 +1,7 @@
 import { HipaaAuditLogEntry, HipaaActionType, ClinicalUser } from "../types";
 import { db, cleanForFirestore } from "../firebase";
 import { collection, doc, setDoc } from "firebase/firestore";
+import { safeStorage } from "./safeStorage";
 
 const AUDIT_STORAGE_KEY = "perio_hipaa_audit_trail";
 
@@ -99,7 +100,7 @@ const INITIAL_AUDIT_LOGS: HipaaAuditLogEntry[] = [
 
 export function getStoredAuditLogs(): HipaaAuditLogEntry[] {
   try {
-    const raw = localStorage.getItem(AUDIT_STORAGE_KEY);
+    const raw = safeStorage.getItem(AUDIT_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
@@ -114,7 +115,7 @@ export function getStoredAuditLogs(): HipaaAuditLogEntry[] {
 
 export function saveStoredAuditLogs(logs: HipaaAuditLogEntry[]) {
   try {
-    localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(logs.slice(0, 500))); // keep latest 500
+    safeStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(logs.slice(0, 500))); // keep latest 500
   } catch (e) {
     console.error("Error saving HIPAA audit logs:", e);
   }
@@ -176,7 +177,7 @@ export async function recordHipaaAudit(
 ): Promise<HipaaAuditLogEntry> {
   const currentUser = options?.user || (function() {
     try {
-      const saved = localStorage.getItem("perioActiveUser");
+      const saved = safeStorage.getItem("perioActiveUser");
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
@@ -248,7 +249,7 @@ const HIPAA_PRIVACY_MODE_KEY = "perio_hipaa_privacy_mode";
 
 export function getHipaaInactivityMinutes(): number {
   try {
-    const val = localStorage.getItem(HIPAA_INACTIVITY_KEY);
+    const val = safeStorage.getItem(HIPAA_INACTIVITY_KEY);
     return val ? parseInt(val, 10) : 15;
   } catch {
     return 15;
@@ -256,17 +257,21 @@ export function getHipaaInactivityMinutes(): number {
 }
 
 export function setHipaaInactivityMinutes(mins: number): void {
-  localStorage.setItem(HIPAA_INACTIVITY_KEY, mins.toString());
+  try {
+    safeStorage.setItem(HIPAA_INACTIVITY_KEY, mins.toString());
+  } catch {}
 }
 
 export function isHipaaPrivacyModeEnabled(): boolean {
   try {
-    return localStorage.getItem(HIPAA_PRIVACY_MODE_KEY) === "true";
+    return safeStorage.getItem(HIPAA_PRIVACY_MODE_KEY) === "true";
   } catch {
     return false;
   }
 }
 
 export function setHipaaPrivacyMode(enabled: boolean): void {
-  localStorage.setItem(HIPAA_PRIVACY_MODE_KEY, enabled ? "true" : "false");
+  try {
+    safeStorage.setItem(HIPAA_PRIVACY_MODE_KEY, enabled ? "true" : "false");
+  } catch {}
 }

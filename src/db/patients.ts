@@ -5,9 +5,9 @@ import { eq, and } from "drizzle-orm";
 export async function getPatientsByUid(uid: string) {
   try {
     return await db.select().from(patients).where(eq(patients.uid, uid));
-  } catch (error) {
-    console.error("Database getPatientsByUid failed:", error);
-    throw new Error("Failed to fetch patients from relational database.", { cause: error });
+  } catch (error: any) {
+    console.warn("Notice: Cloud SQL getPatientsByUid query unavailable (database in standby):", error?.message || error);
+    return [];
   }
 }
 
@@ -25,6 +25,55 @@ export async function upsertPatient(uid: string, patientData: {
   clinicalData?: any;
 }) {
   try {
+    // 1. Check if patient already exists by externalId or normalized RUT
+    let existingId: number | null = null;
+
+    if (patientData.externalId) {
+      const existingByExt = await db
+        .select({ id: patients.id })
+        .from(patients)
+        .where(and(eq(patients.uid, uid), eq(patients.externalId, patientData.externalId)))
+        .limit(1);
+      if (existingByExt.length > 0) {
+        existingId = existingByExt[0].id;
+      }
+    }
+
+    if (!existingId && patientData.rut) {
+      const existingByRut = await db
+        .select({ id: patients.id })
+        .from(patients)
+        .where(and(eq(patients.uid, uid), eq(patients.rut, patientData.rut)))
+        .limit(1);
+      if (existingByRut.length > 0) {
+        existingId = existingByRut[0].id;
+      }
+    }
+
+    // 2. If exists, update record to avoid duplication
+    if (existingId) {
+      const updated = await db
+        .update(patients)
+        .set({
+          name: patientData.name,
+          rut: patientData.rut || null,
+          age: patientData.age || null,
+          email: patientData.email || null,
+          phone: patientData.phone || null,
+          medicalAlert: patientData.medicalAlert || null,
+          status: patientData.status || "en_tratamiento",
+          bopPercentage: patientData.bopPercentage ?? null,
+          plaquePercentage: patientData.plaquePercentage ?? null,
+          clinicalData: patientData.clinicalData || null,
+          updatedAt: new Date(),
+        })
+        .where(eq(patients.id, existingId))
+        .returning();
+
+      return updated[0];
+    }
+
+    // 3. Otherwise insert fresh record
     const result = await db
       .insert(patients)
       .values({

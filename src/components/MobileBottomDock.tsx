@@ -18,6 +18,7 @@ interface MobileBottomDockProps {
   onOpenNewPatient: () => void;
   onToggleFastProbing?: () => void;
   onOpenMenu?: () => void;
+  handsFreeVoiceActive?: boolean;
 }
 
 function MobileBottomDockComponent({
@@ -28,7 +29,8 @@ function MobileBottomDockComponent({
   onOpenNewAppointment,
   onOpenNewPatient,
   onToggleFastProbing,
-  onOpenMenu
+  onOpenMenu,
+  handsFreeVoiceActive = false
 }: MobileBottomDockProps) {
   return (
     <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-slate-200/80 dark:border-slate-800/80 px-2 pt-1.5 pb-[calc(env(safe-area-inset-bottom)+8px)] shadow-[0_-4px_25px_rgba(0,0,0,0.08)] no-print">
@@ -84,11 +86,18 @@ function MobileBottomDockComponent({
           <button
             type="button"
             onClick={onToggleVoice}
-            className="w-13 h-13 bg-gradient-to-tr from-teal-600 via-emerald-600 to-teal-500 text-white rounded-full shadow-lg shadow-teal-500/40 hover:scale-105 active:scale-95 transition-all flex flex-col items-center justify-center ring-4 ring-white dark:ring-slate-900 cursor-pointer"
+            className={`w-13 h-13 bg-gradient-to-tr from-teal-600 via-emerald-600 to-teal-500 text-white rounded-full shadow-lg hover:scale-105 active:scale-95 transition-all flex flex-col items-center justify-center cursor-pointer relative touch-manipulation ${
+              handsFreeVoiceActive
+                ? "ring-4 ring-emerald-400 dark:ring-emerald-500 shadow-emerald-500/50"
+                : "ring-4 ring-white dark:ring-slate-900 shadow-teal-500/40"
+            }`}
             title="Copiloto Dentito (Asistente de Voz)"
           >
             <Mic className="w-5 h-5 text-white animate-pulse" />
             <span className="text-[8px] font-black uppercase tracking-tighter text-teal-100 mt-0.5">Dentito</span>
+            {handsFreeVoiceActive && (
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 absolute top-0.5 right-0.5 ring-2 ring-white dark:ring-slate-900 animate-ping" />
+            )}
           </button>
         </div>
 

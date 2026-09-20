@@ -1,4 +1,4 @@
-import { Patient, ToothState, PeriodonState, Appointment, OLearyState, Anamnesis, XRayImage, TreatmentPlan, TreatmentProcedure } from "./types";
+import { Patient, ToothState, PeriodonState, Appointment, OLearyState, PsrRecord, Anamnesis, XRayImage, TreatmentPlan, TreatmentProcedure } from "./types";
 
 // Adult FDI Two-Digit Notation Teeth lists (11-48):
 export const UPPER_TEETH = {
@@ -89,6 +89,19 @@ export function createEmptyOLeary(): Record<number, OLearyState> {
     };
   });
   return oleary;
+}
+
+export function createEmptyPsr(): PsrRecord {
+  return {
+    s1: { code: null, hasAsterisk: false },
+    s2: { code: null, hasAsterisk: false },
+    s3: { code: null, hasAsterisk: false },
+    s4: { code: null, hasAsterisk: false },
+    s5: { code: null, hasAsterisk: false },
+    s6: { code: null, hasAsterisk: false },
+    updatedAt: new Date().toISOString(),
+    globalRecommendation: ""
+  };
 }
 
 export function createEmptyAnamnesis(): Anamnesis {
@@ -247,6 +260,16 @@ export const INITIAL_PATIENTS: Patient[] = [
       }
     },
     oLeary: createEmptyOLeary(),
+    psr: {
+      s1: { code: 2, hasAsterisk: false },
+      s2: { code: 3, hasAsterisk: false },
+      s3: { code: 2, hasAsterisk: false },
+      s4: { code: 4, hasAsterisk: true },
+      s5: { code: 2, hasAsterisk: false },
+      s6: { code: 3, hasAsterisk: false },
+      updatedAt: "2026-05-15T10:30:00Z",
+      globalRecommendation: "Periodontitis avanzada en S4 y moderada en S2/S6. Requiere periodontograma completo a 6 puntos y RAR."
+    },
     anamnesis: {
       ...createEmptyAnamnesis(),
       hta: true,
@@ -270,6 +293,16 @@ export const INITIAL_PATIENTS: Patient[] = [
     odontogram: createEmptyOdontogram(),
     periodontogram: createEmptyPeriodontogram(),
     oLeary: createEmptyOLeary(),
+    psr: {
+      s1: { code: 0, hasAsterisk: false },
+      s2: { code: 1, hasAsterisk: false },
+      s3: { code: 0, hasAsterisk: false },
+      s4: { code: 0, hasAsterisk: false },
+      s5: { code: 1, hasAsterisk: false },
+      s6: { code: 0, hasAsterisk: false },
+      updatedAt: "2026-05-18T14:30:00Z",
+      globalRecommendation: "Salud gingival generalizada con gingivitis localizada en sectores anteriores (S2 y S5). Profilaxis y refuerzo de técnica de cepillado."
+    },
     anamnesis: createEmptyAnamnesis(),
     xRays: [],
     treatmentPlan: createEmptyTreatmentPlan(),
@@ -363,6 +396,7 @@ export const INITIAL_PATIENTS: Patient[] = [
       }
     },
     oLeary: createEmptyOLeary(),
+    psr: createEmptyPsr(),
     anamnesis: {
       ...createEmptyAnamnesis(),
       tabaquismo: 10

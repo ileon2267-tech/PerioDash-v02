@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Patient, CustomSpecialtyMarker } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import { copyToClipboardSafely } from '../utils/safeClipboard';
 import { 
   Calculator, 
   Zap, 
@@ -211,8 +212,8 @@ export const SpecialtyToolsSuite: React.FC<SpecialtyToolsSuiteProps> = ({
   };
 
   // Copy or apply calculations to Patient record
-  const handleCopyNote = (text: string) => {
-    navigator.clipboard.writeText(text);
+  const handleCopyNote = async (text: string) => {
+    await copyToClipboardSafely(text);
     setCopiedNote(true);
     setTimeout(() => setCopiedNote(false), 2000);
 

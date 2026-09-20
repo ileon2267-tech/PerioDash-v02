@@ -25,8 +25,13 @@ import {
   ShieldCheck,
   Stethoscope,
   Activity,
-  FileText
+  FileText,
+  Zap,
+  ExternalLink,
+  Mic,
+  MicOff
 } from 'lucide-react';
+import { DENTITO_APP_URL } from '../services/dentitoFinanceSync';
 
 interface MobileNavigationDrawerProps {
   isOpen: boolean;
@@ -45,6 +50,10 @@ interface MobileNavigationDrawerProps {
   onOpenNewPatient: () => void;
   onOpenNewAppointment: () => void;
   onOpenLanding?: () => void;
+  onOpenChairMode?: () => void;
+  handsFreeVoiceActive?: boolean;
+  onToggleHandsFreeVoice?: () => void;
+  onOpenVoiceHelp?: () => void;
   onLogout: () => void;
 }
 
@@ -65,6 +74,10 @@ function MobileNavigationDrawerComponent({
   onOpenNewPatient,
   onOpenNewAppointment,
   onOpenLanding,
+  onOpenChairMode,
+  handsFreeVoiceActive = false,
+  onToggleHandsFreeVoice,
+  onOpenVoiceHelp,
   onLogout
 }: MobileNavigationDrawerProps) {
   useEffect(() => {
@@ -93,6 +106,7 @@ function MobileNavigationDrawerComponent({
       items: [
         { id: "dashboard", label: "Panel Principal", icon: LayoutDashboard },
         { id: "finanzas", label: "Plan & Finanzas", icon: Banknote },
+        { id: "dentito-finance", label: "Dentito Finance", icon: Zap, isExternal: true, url: DENTITO_APP_URL },
         { id: "reportes", label: "Imp / Reportes", icon: Printer }
       ]
     },
@@ -115,6 +129,7 @@ function MobileNavigationDrawerComponent({
   const CLINICAL_SUB_VIEWS = [
     { id: "odontograma", label: "Odontograma" },
     { id: "periodontograma", label: "Periodontograma" },
+    { id: "psr", label: "Sondaje PSR (OMS)" },
     { id: "ficha", label: "Ficha Médica" },
     { id: "especialidad", label: "Especialidades" },
     { id: "xrays", label: "Radiografías" },
@@ -228,6 +243,82 @@ function MobileNavigationDrawerComponent({
                 </button>
               </div>
 
+              {/* Modo Sillón Button */}
+              {onOpenChairMode && (
+                <button
+                  onClick={() => {
+                    onOpenChairMode();
+                    onClose();
+                  }}
+                  className="w-full p-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-between shadow-xs cursor-pointer min-h-[44px] touch-manipulation"
+                >
+                  <div className="flex items-center gap-2">
+                    <Stethoscope className="w-4 h-4" />
+                    <span>Modo Sillón Clínico (XL + Voz)</span>
+                  </div>
+                  <span className="text-[9px] bg-white/20 px-1.5 py-0.5 rounded font-mono font-bold">
+                    Alt+S
+                  </span>
+                </button>
+              )}
+
+              {/* Control por Voz Manos Libres Móvil */}
+              {onToggleHandsFreeVoice && (
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                        handsFreeVoiceActive
+                          ? "bg-teal-500/20 text-teal-600 dark:text-teal-400"
+                          : "bg-slate-200 dark:bg-slate-700 text-slate-500"
+                      }`}>
+                        {handsFreeVoiceActive ? (
+                          <Mic className="w-4 h-4 animate-pulse" />
+                        ) : (
+                          <MicOff className="w-4 h-4" />
+                        )}
+                      </div>
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        Voz Manos Libres
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => onToggleHandsFreeVoice()}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all shadow-xs min-h-[38px] flex items-center gap-1.5 touch-manipulation ${
+                        handsFreeVoiceActive
+                          ? "bg-teal-600 text-white shadow-teal-500/20 ring-2 ring-teal-500/30"
+                          : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+                      }`}
+                    >
+                      {handsFreeVoiceActive ? (
+                        <>
+                          <span className="w-2 h-2 rounded-full bg-emerald-300 animate-ping" />
+                          <span>Activa</span>
+                        </>
+                      ) : (
+                        <span>Pausada</span>
+                      )}
+                    </button>
+                  </div>
+
+                  {onOpenVoiceHelp && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onOpenVoiceHelp();
+                        onClose();
+                      }}
+                      className="w-full py-2 px-2.5 rounded-xl text-[11px] font-semibold text-teal-700 dark:text-teal-300 bg-teal-500/10 hover:bg-teal-500/15 transition-colors flex items-center justify-between cursor-pointer min-h-[36px] touch-manipulation"
+                    >
+                      <span>Ver comandos de voz disponibles</span>
+                      <span>&rarr;</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* Quick Search & Help Trigger */}
               <div className="space-y-1.5">
                 <button
@@ -300,6 +391,26 @@ function MobileNavigationDrawerComponent({
                       const ItemIcon = item.icon;
                       const isActive = activeTab === item.id;
                       const isSpecial = item.id === "dentalstories" || item.id === "tienda" || item.id === "bolsa-empleo";
+                      const isExternal = (item as any).isExternal;
+
+                      if (isExternal) {
+                        return (
+                          <a
+                            key={item.id}
+                            href={(item as any).url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={onClose}
+                            className="w-full p-2.5 rounded-2xl text-xs font-bold flex items-center justify-between transition-all cursor-pointer bg-gradient-to-r from-amber-500/10 to-teal-500/10 hover:from-amber-500/20 hover:to-teal-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 shadow-xs"
+                          >
+                            <div className="flex items-center gap-3">
+                              <Zap className="w-4 h-4 text-amber-500" />
+                              <span>{item.label}</span>
+                            </div>
+                            <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                          </a>
+                        );
+                      }
 
                       return (
                         <button

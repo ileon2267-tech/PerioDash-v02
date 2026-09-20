@@ -17,10 +17,31 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   public static getDerivedStateFromError(error: Error): State {
+    const msg = (error?.message || "").toLowerCase();
+    const name = error?.name || "";
+    if (
+      name === "SecurityError" ||
+      msg.includes("insecure") ||
+      msg.includes("securityerror") ||
+      msg.includes("script error")
+    ) {
+      // Non-fatal browser sandbox / iframe permission error - do not crash application
+      return { hasError: false, error: null };
+    }
     return { hasError: true, error };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    const msg = (error?.message || "").toLowerCase();
+    const name = error?.name || "";
+    if (
+      name === "SecurityError" ||
+      msg.includes("insecure") ||
+      msg.includes("securityerror") ||
+      msg.includes("script error")
+    ) {
+      return;
+    }
     console.warn("Caught in ErrorBoundary:", error, errorInfo);
   }
 

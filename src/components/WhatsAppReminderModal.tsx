@@ -24,9 +24,12 @@ import {
   Zap, 
   CheckCircle2, 
   AlertTriangle,
-  RefreshCw
+  RefreshCw,
+  Mail
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { copyToClipboardSafely } from "../utils/safeClipboard";
+import GmailCenterModal from "./GmailCenterModal";
 
 interface WhatsAppReminderModalProps {
   isOpen: boolean;
@@ -61,6 +64,7 @@ export default function WhatsAppReminderModal({
   const [isSending, setIsSending] = useState(false);
   const [copied, setCopied] = useState(false);
   const [sendResult, setSendResult] = useState<WhatsAppSendResult | null>(null);
+  const [showGmailModal, setShowGmailModal] = useState(false);
 
   // Load Twilio config on mount
   useEffect(() => {
@@ -92,8 +96,8 @@ export default function WhatsAppReminderModal({
   const rawPhone = (patient.phone || "").replace(/[^0-9+]/g, "");
   const hasValidPhone = rawPhone.length >= 8;
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(messageText);
+  const handleCopy = async () => {
+    await copyToClipboardSafely(messageText);
     setCopied(true);
     setTimeout(() => setCopied(false), 2200);
   };
@@ -411,7 +415,17 @@ export default function WhatsAppReminderModal({
               <span>{copied ? "¡Copiado al Portapapeles!" : "Copiar Texto"}</span>
             </button>
 
-            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+              <button
+                type="button"
+                onClick={() => setShowGmailModal(true)}
+                className="flex-1 sm:flex-initial px-4 py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+                title="Enviar este recordatorio o mensaje clínico mediante correo oficial de Gmail"
+              >
+                <Mail className="w-4 h-4" />
+                <span>Enviar por Gmail</span>
+              </button>
+
               <button
                 type="button"
                 onClick={handleDirectWaMe}
@@ -446,6 +460,20 @@ export default function WhatsAppReminderModal({
           </div>
 
         </motion.div>
+
+        {showGmailModal && (
+          <GmailCenterModal
+            isOpen={showGmailModal}
+            onClose={() => setShowGmailModal(false)}
+            darkMode={document.documentElement.classList.contains('dark')}
+            patients={[patient]}
+            currentUser={{ id: '1', name: doctorName, role: 'periodoncista', email: 'doctor@perio.com' } as any}
+            initialPatient={patient}
+            initialTemplate="appointmentReminder"
+            initialSubject={`Recordatorio de Cita - ${clinicName}`}
+            initialBody={messageText}
+          />
+        )}
       </div>
     </AnimatePresence>
   );

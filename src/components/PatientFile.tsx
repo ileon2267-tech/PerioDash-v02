@@ -3,6 +3,7 @@ import { Patient, Evolution, Anamnesis, Consentimiento } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import ClinicalPhotography from './ClinicalPhotography';
 import PatientCommunications from './PatientCommunications';
+import PatientTimeline from './PatientTimeline';
 import { recordHipaaAudit } from '../utils/hipaaAudit';
 import { 
   Save, 
@@ -33,7 +34,8 @@ import {
   Camera,
   MessageSquare,
   ArrowLeft,
-  Users
+  Users,
+  Clock
 } from 'lucide-react';
 
 interface PatientFileProps {
@@ -71,7 +73,7 @@ const ToggleHeader = ({ id, icon: Icon, title, description, expandedSection, set
 }
 
 export default function PatientFile({ patient, onUpdatePatient, onClose }: PatientFileProps) {
-  const [activeTab, setActiveTab] = useState<'anamnesis' | 'evoluciones' | 'consentimientos' | 'fotografia' | 'comunicaciones'>('anamnesis');
+  const [activeTab, setActiveTab] = useState<'anamnesis' | 'evoluciones' | 'consentimientos' | 'fotografia' | 'comunicaciones' | 'timeline'>('anamnesis');
   const [expandedSection, setExpandedSection] = useState<string>('motivo');
   
   // Consentimientos state
@@ -365,57 +367,23 @@ Acepto y entiendo los siguientes riesgos clínicos y advertencias fundamentales:
       exit={{ opacity: 0, y: -5 }}
       className="w-full text-slate-800 dark:text-slate-200 overflow-hidden rounded-2xl"
     >
-      {/* Clean Unified Header: Patient Identification & Clinical Flow */}
-      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 p-4 md:p-5 transition-colors">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          
-          {/* Patient Info */}
-          <div className="flex items-center gap-3.5 min-w-0">
-            {onClose && (
-              <button
-                onClick={onClose}
-                className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer flex items-center gap-1.5 text-xs font-bold shrink-0"
-                title="Cerrar ficha y volver al directorio de pacientes"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span className="hidden sm:inline">Directorio</span>
-              </button>
-            )}
+      {/* Unified Clinical Workflow Bar: Flow Status & Staging (Eliminates redundant demographics already in top bar) */}
+      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-3 sm:px-4 py-2 sm:py-2.5 transition-colors flex flex-wrap items-center justify-between gap-2.5 shadow-2xs">
+        {/* Left: Quick Return & Flow Location */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="p-1.5 px-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer flex items-center gap-1.5 text-xs font-bold shrink-0"
+              title="Volver al directorio de pacientes"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Directorio</span>
+            </button>
+          )}
 
-            <div className="w-11 h-11 rounded-2xl bg-teal-50 dark:bg-teal-950/50 border border-teal-200 dark:border-teal-800/60 flex items-center justify-center font-display font-black text-teal-700 dark:text-teal-300 text-base shrink-0 shadow-2xs">
-              {patient.name.charAt(0)}
-            </div>
-
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-base md:text-lg font-bold text-slate-900 dark:text-white tracking-tight truncate">
-                  {patient.name}
-                </h2>
-                {patient.rut ? (
-                  <span className="px-2 py-0.5 rounded-lg bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800/60 text-xs font-mono font-bold">
-                    RUT: {patient.rut}
-                  </span>
-                ) : (
-                  <span className="px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 text-[11px] font-mono">
-                    Sin RUT
-                  </span>
-                )}
-              </div>
-
-              <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-3 mt-1 flex-wrap font-medium">
-                <span className="font-mono bg-slate-100 dark:bg-slate-800/80 px-1.5 py-0.5 rounded-md text-slate-600 dark:text-slate-400 text-[11px]">
-                  #{patient.id.split('-')[1] || patient.id}
-                </span>
-                {patient.birthdate && <span>🎂 {patient.birthdate}</span>}
-                {patient.phone && <span>📞 {patient.phone}</span>}
-                {patient.email && <span className="hidden sm:inline">✉️ {patient.email}</span>}
-              </div>
-            </div>
-          </div>
-
-          {/* Real-time Clinical Flow Pill-Group */}
-          <div className="flex items-center gap-1.5 flex-wrap bg-slate-50 dark:bg-slate-800/60 p-1.5 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 self-start lg:self-auto">
-            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 px-2 hidden xl:inline">
+          <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/60 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700/60">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1.5 hidden md:inline">
               Ubicación:
             </span>
 
@@ -431,14 +399,14 @@ Acepto y entiendo los siguientes riesgos clínicos y advertencias fundamentales:
                   statusUpdatedAt: now
                 });
               }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                 patient.flowStatus === 'espera' 
                   ? 'bg-amber-500 text-slate-950 font-black shadow-xs ring-2 ring-amber-400/40' 
                   : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-amber-50 dark:hover:bg-amber-950/30 border border-slate-200 dark:border-slate-700'
               }`}
             >
               <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
-              En Espera
+              <span>En Espera</span>
             </button>
 
             {/* En Sillón */}
@@ -453,14 +421,14 @@ Acepto y entiendo los siguientes riesgos clínicos y advertencias fundamentales:
                   statusUpdatedAt: now
                 });
               }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                 patient.flowStatus === 'en_sillon' 
                   ? 'bg-emerald-500 text-slate-950 font-black shadow-xs ring-2 ring-emerald-400/40' 
                   : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border border-slate-200 dark:border-slate-700'
               }`}
             >
               <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0 animate-pulse"></span>
-              En Sillón
+              <span>En Sillón</span>
             </button>
 
             {patient.flowStatus === 'en_sillon' && (
@@ -472,7 +440,7 @@ Acepto y entiendo los siguientes riesgos clínicos y advertencias fundamentales:
                     chairAssigned: e.target.value
                   });
                 }}
-                className="text-xs bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200 rounded-xl px-2 py-1.5 font-bold outline-none cursor-pointer"
+                className="text-xs bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200 rounded-lg px-2 py-1 font-bold outline-none cursor-pointer"
               >
                 <option value="Sillón 1">Sillón 1</option>
                 <option value="Sillón 2">Sillón 2</option>
@@ -492,14 +460,14 @@ Acepto y entiendo los siguientes riesgos clínicos y advertencias fundamentales:
                   statusUpdatedAt: now
                 });
               }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                 patient.flowStatus === 'atendido' 
                   ? 'bg-sky-500 text-slate-950 font-black shadow-xs ring-2 ring-sky-400/40' 
                   : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-sky-50 dark:hover:bg-sky-950/30 border border-slate-200 dark:border-slate-700'
               }`}
             >
               <span className="w-2 h-2 rounded-full bg-sky-400 shrink-0"></span>
-              Atendido
+              <span>Atendido</span>
             </button>
 
             {/* Concluido */}
@@ -513,89 +481,77 @@ Acepto y entiendo los siguientes riesgos clínicos y advertencias fundamentales:
                   statusUpdatedAt: now
                 });
               }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                 patient.flowStatus === 'completado' 
                   ? 'bg-teal-600 text-white font-bold shadow-xs ring-2 ring-teal-400/40' 
                   : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-teal-50 dark:hover:bg-teal-950/30 border border-slate-200 dark:border-slate-700'
               }`}
             >
               <Check className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-              Concluido
+              <span>Concluido</span>
             </button>
           </div>
-
-        </div>
-      </div>
-
-      {/* Patient Lifecycle Status & Staging Bar */}
-      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 p-4 rounded-t-none flex flex-wrap items-center justify-between gap-3 shadow-2xs">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mr-1">Estado Clínico:</span>
-          
-          {[
-            { id: 'evaluacion', label: 'Evaluación', color: 'bg-amber-500/10 text-amber-600 dark:bg-amber-500/20 dark:text-amber-300' },
-            { id: 'en_tratamiento', label: 'En Tratamiento', color: 'bg-teal-500/10 text-teal-600 dark:bg-teal-500/20 dark:text-teal-300' },
-            { id: 'mantenimiento', label: 'Mantenimiento', color: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-300' },
-            { id: 'alta', label: 'Alta Clínica', color: 'bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-300' },
-            { id: 'inactivo', label: 'Inactivo', color: 'bg-slate-500/10 text-slate-600 dark:bg-slate-500/20 dark:text-slate-400' },
-          ].map(st => {
-            const isSelected = (patient.status || 'en_tratamiento') === st.id;
-            return (
-              <button
-                key={st.id}
-                onClick={() => {
-                  onUpdatePatient({
-                    ...patient,
-                    status: st.id as any
-                  });
-                }}
-                className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  isSelected ? `${st.color} ring-2 ring-teal-500/50 scale-105 shadow-xs` : 'bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-slate-600'
-                }`}
-              >
-                {st.label}
-              </button>
-            );
-          })}
         </div>
 
-        {/* AAP 2018 Staging Selector */}
-        <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
-          <span className="text-xs font-bold text-teal-600 dark:text-teal-400">AAP 2018:</span>
-          <select
-            value={patient.periodontalRisk?.stage || 'II'}
-            onChange={(e) => {
-              const currentRisk = patient.periodontalRisk || { stage: 'II', grade: 'B', riskLevel: 'medio' };
-              onUpdatePatient({
-                ...patient,
-                periodontalRisk: { ...currentRisk, stage: e.target.value as any }
-              });
-            }}
-            className="text-xs font-bold bg-transparent border-0 text-slate-800 dark:text-slate-200 focus:outline-hidden"
-          >
-            <option value="I">Estadio I (Incipiente)</option>
-            <option value="II">Estadio II (Moderado)</option>
-            <option value="III">Estadio III (Severo)</option>
-            <option value="IV">Estadio IV (Avanzado)</option>
-          </select>
+        {/* Right: Estado Clínico & AAP 2018 Staging */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/60 px-2.5 py-1 rounded-xl border border-slate-200/80 dark:border-slate-700/60">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Estado:</span>
+            <select
+              value={patient.status || 'en_tratamiento'}
+              onChange={(e) => {
+                onUpdatePatient({
+                  ...patient,
+                  status: e.target.value as any
+                });
+              }}
+              className="text-xs font-bold bg-transparent border-0 text-teal-700 dark:text-teal-300 outline-none cursor-pointer"
+            >
+              <option value="evaluacion">Evaluación</option>
+              <option value="en_tratamiento">En Tratamiento</option>
+              <option value="mantenimiento">Mantenimiento</option>
+              <option value="alta">Alta Clínica</option>
+              <option value="inactivo">Inactivo</option>
+            </select>
+          </div>
 
-          <span className="text-slate-300 dark:text-slate-700">|</span>
+          <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/60 px-2.5 py-1 rounded-xl border border-slate-200/80 dark:border-slate-700/60">
+            <span className="text-xs font-bold text-teal-600 dark:text-teal-400">AAP 2018:</span>
+            <select
+              value={patient.periodontalRisk?.stage || 'II'}
+              onChange={(e) => {
+                const currentRisk = patient.periodontalRisk || { stage: 'II', grade: 'B', riskLevel: 'medio' };
+                onUpdatePatient({
+                  ...patient,
+                  periodontalRisk: { ...currentRisk, stage: e.target.value as any }
+                });
+              }}
+              className="text-xs font-bold bg-transparent border-0 text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
+            >
+              <option value="I">Estadio I</option>
+              <option value="II">Estadio II</option>
+              <option value="III">Estadio III</option>
+              <option value="IV">Estadio IV</option>
+            </select>
 
-          <select
-            value={patient.periodontalRisk?.grade || 'B'}
-            onChange={(e) => {
-              const currentRisk = patient.periodontalRisk || { stage: 'II', grade: 'B', riskLevel: 'medio' };
-              onUpdatePatient({
-                ...patient,
-                periodontalRisk: { ...currentRisk, grade: e.target.value as any }
-              });
-            }}
-            className="text-xs font-bold bg-transparent border-0 text-slate-800 dark:text-slate-200 focus:outline-hidden"
-          >
-            <option value="A">Grado A (Progresión Lenta)</option>
-            <option value="B">Grado B (Moderada)</option>
-            <option value="C">Grado C (Rápida / Fuma/Diab.)</option>
-          </select>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+
+            <select
+              value={patient.periodontalRisk?.grade || 'B'}
+              onChange={(e) => {
+                const currentRisk = patient.periodontalRisk || { stage: 'II', grade: 'B', riskLevel: 'medio' };
+                onUpdatePatient({
+                  ...patient,
+                  periodontalRisk: { ...currentRisk, grade: e.target.value as any }
+                });
+              }}
+              className="text-xs font-bold bg-transparent border-0 text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
+            >
+              <option value="A">Grado A</option>
+              <option value="B">Grado B</option>
+              <option value="C">Grado C</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -655,6 +611,17 @@ Acepto y entiendo los siguientes riesgos clínicos y advertencias fundamentales:
         >
           <MessageSquare className="w-4 h-4" />
           Recordatorios & WhatsApp
+        </button>
+        <button
+          onClick={() => setActiveTab('timeline')}
+          className={`px-4 sm:px-6 py-3 font-semibold text-sm border-b-2 transition-colors flex items-center gap-2 flex-shrink-0 ${
+            activeTab === 'timeline' 
+              ? 'border-teal-500 text-teal-600 dark:text-teal-400' 
+              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+          }`}
+        >
+          <Clock className="w-4 h-4" />
+          Línea de Tiempo (Historial)
         </button>
       </div>
 
@@ -2598,6 +2565,18 @@ Acepto y entiendo los siguientes riesgos clínicos y advertencias fundamentales:
                 doctorName="Dr. Titular"
                 onUpdatePatient={onUpdatePatient}
               />
+            </motion.div>
+          )}
+
+          {activeTab === 'timeline' && (
+            <motion.div
+              key="timeline"
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.15 }}
+            >
+              <PatientTimeline patient={patient} />
             </motion.div>
           )}
 

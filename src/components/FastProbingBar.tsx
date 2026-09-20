@@ -78,13 +78,21 @@ export default function FastProbingBar({
 
   const currentToothNumber = PROBING_SEQUENCE[toothIdx] || 18;
 
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
   // Sound generator using Web Audio API
   const playBeep = useCallback((freq = 600, duration = 0.08) => {
     if (!audioFeedback) return;
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioCtx) return;
-      const ctx = new AudioCtx();
+      if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+        audioCtxRef.current = new AudioCtx();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
@@ -95,7 +103,7 @@ export default function FastProbingBar({
       gain.connect(ctx.destination);
       osc.start();
       osc.stop(ctx.currentTime + duration);
-    } catch (e) {
+    } catch {
       // Audio not supported or blocked
     }
   }, [audioFeedback]);
@@ -266,139 +274,276 @@ export default function FastProbingBar({
   useEffect(() => {
     if (!isActive || !isVoiceActive) return;
 
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setRecognitionError("Tu navegador no soporta reconocimiento de voz continuo.");
+    setRecognitionError(null);
+
+    const SpeechRecognitionClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionClass) {
+      setRecognitionError("Tu navegador no soporta reconocimiento de voz continuo. Usa Google Chrome o Microsoft Edge.");
       setIsVoiceActive(false);
       return;
     }
 
-    const rec = new SpeechRecognition();
+    let isTerminated = false;
+    let rec: any = null;
+    const executedActionsByIndex = new Map<number, Set<string>>();
+    const consumedNumbersByIndex = new Map<number, number>();
+
+    try {
+      rec = new SpeechRecognitionClass();
+    } catch {
+      setRecognitionError("No se pudo inicializar el servicio de reconocimiento de voz.");
+      setIsVoiceActive(false);
+      return;
+    }
+
     rec.continuous = true;
-    rec.interimResults = false;
-    rec.lang = 'es-ES';
+    rec.interimResults = true;
+    rec.lang = typeof navigator !== "undefined" && navigator.language?.startsWith("es")
+      ? navigator.language
+      : "es-ES";
 
     rec.onresult = (event: any) => {
-      const lastIndex = event.results.length - 1;
-      const rawTranscript = event.results[lastIndex][0].transcript;
-      const transcript = rawTranscript.toLowerCase().trim();
-      setLastSpokenText(rawTranscript);
+      try {
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const result = event.results[i];
+          const rawTranscript = result[0]?.transcript;
+          if (!rawTranscript) continue;
 
-      // 1. Tooth direct jump: "pieza 16" or "diente 24"
-      const toothMatch = transcript.match(/(?:pieza|diente|fdi)\s*(\d{2})/);
-      if (toothMatch && toothMatch[1]) {
-        const parsedTooth = parseInt(toothMatch[1], 10);
-        const idx = PROBING_SEQUENCE.indexOf(parsedTooth);
-        if (idx !== -1) {
-          setToothIdx(idx);
-          return;
-        }
-      }
+          const transcript = rawTranscript.toLowerCase().trim();
+          setLastSpokenText(rawTranscript);
 
-      // 2. Aspect changes
-      if (transcript.includes('vestibular') || transcript.includes('afuera') || transcript.includes('exterior')) {
-        setAspect('vestibular');
-        return;
-      }
-      if (transcript.includes('palatino') || transcript.includes('lingual') || transcript.includes('adentro') || transcript.includes('interior')) {
-        setAspect('palatino');
-        return;
-      }
+          let executedSet = executedActionsByIndex.get(i);
+          if (!executedSet) {
+            executedSet = new Set<string>();
+            executedActionsByIndex.set(i, executedSet);
+          }
 
-      // 3. Site positions
-      if (transcript.includes('mesial')) {
-        setSite('mesial');
-        return;
-      }
-      if (transcript.includes('central') || transcript.includes('medio')) {
-        setSite('central');
-        return;
-      }
-      if (transcript.includes('distal')) {
-        setSite('distal');
-        return;
-      }
+          // 0. Chair mode jump
+          if (
+            transcript.includes('modo sillon') ||
+            transcript.includes('modo sillón') ||
+            transcript.includes('abrir sillon') ||
+            transcript.includes('activar sillon') ||
+            transcript.includes('entrar a modo sillon') ||
+            transcript.includes('sillon clinico') ||
+            transcript === 'sillon' ||
+            transcript === 'sillón'
+          ) {
+            if (!executedSet.has('chair_mode')) {
+              executedSet.add('chair_mode');
+              window.dispatchEvent(new CustomEvent('periodash-open-chair-mode'));
+            }
+            continue;
+          }
 
-      // 4. Metric toggle
-      if (transcript.includes('bolsa') || transcript.includes('sondaje') || transcript.includes('profundidad')) {
-        setMetric('pocket');
-        return;
-      }
-      if (transcript.includes('recesión') || transcript.includes('recesion') || transcript.includes('margen')) {
-        setMetric('recess');
-        return;
-      }
+          // 1. Tooth direct jump: "pieza 16" or "diente 24"
+          const toothMatch = transcript.match(/(?:pieza|diente|fdi)\s*(\d{2})/);
+          if (toothMatch && toothMatch[1]) {
+            const parsedTooth = parseInt(toothMatch[1], 10);
+            const toothKey = `tooth_${parsedTooth}`;
+            if (!executedSet.has(toothKey)) {
+              executedSet.add(toothKey);
+              const idx = PROBING_SEQUENCE.indexOf(parsedTooth);
+              if (idx !== -1) {
+                setToothIdx(idx);
+              }
+            }
+            continue;
+          }
 
-      // 5. Clinical flags
-      if (transcript.includes('sangrado') || transcript.includes('sangra') || transcript.includes('bop')) {
-        stateRef.current.toggleFlag('sangrado');
-        return;
-      }
-      if (transcript.includes('placa') || transcript.includes('sarro') || transcript.includes('bacteria')) {
-        stateRef.current.toggleFlag('placa');
-        return;
-      }
-      if (transcript.includes('supuración') || transcript.includes('supuracion') || transcript.includes('pus')) {
-        stateRef.current.toggleFlag('supuracion');
-        return;
-      }
+          // 2. Aspect changes
+          if (transcript.includes('vestibular') || transcript.includes('afuera') || transcript.includes('exterior')) {
+            if (!executedSet.has('aspect_vestibular')) {
+              executedSet.add('aspect_vestibular');
+              setAspect('vestibular');
+            }
+            continue;
+          }
+          if (transcript.includes('palatino') || transcript.includes('lingual') || transcript.includes('adentro') || transcript.includes('interior')) {
+            if (!executedSet.has('aspect_palatino')) {
+              executedSet.add('aspect_palatino');
+              setAspect('palatino');
+            }
+            continue;
+          }
 
-      // 6. Navigation
-      if (transcript.includes('siguiente') || transcript.includes('avanzar') || transcript.includes('saltar')) {
-        stateRef.current.advancePosition();
-        return;
-      }
-      if (transcript.includes('atrás') || transcript.includes('atras') || transcript.includes('anterior')) {
-        stateRef.current.retreatPosition();
-        return;
-      }
+          // 3. Site positions
+          if (transcript.includes('mesial')) {
+            if (!executedSet.has('site_mesial')) {
+              executedSet.add('site_mesial');
+              setSite('mesial');
+            }
+            continue;
+          }
+          if (transcript.includes('central') || transcript.includes('medio')) {
+            if (!executedSet.has('site_central')) {
+              executedSet.add('site_central');
+              setSite('central');
+            }
+            continue;
+          }
+          if (transcript.includes('distal')) {
+            if (!executedSet.has('site_distal')) {
+              executedSet.add('site_distal');
+              setSite('distal');
+            }
+            continue;
+          }
 
-      // 7. Check for a series of spoken numbers (e.g., "cuatro tres cuatro" or "4 3 4")
-      const words = transcript.split(/\s+/);
-      const recognizedValues: number[] = [];
+          // 4. Metric toggle
+          if (transcript.includes('bolsa') || transcript.includes('sondaje') || transcript.includes('profundidad')) {
+            if (!executedSet.has('metric_pocket')) {
+              executedSet.add('metric_pocket');
+              setMetric('pocket');
+            }
+            continue;
+          }
+          if (transcript.includes('recesión') || transcript.includes('recesion') || transcript.includes('margen')) {
+            if (!executedSet.has('metric_recess')) {
+              executedSet.add('metric_recess');
+              setMetric('recess');
+            }
+            continue;
+          }
 
-      for (const word of words) {
-        if (SPANISH_NUM_MAP[word] !== undefined) {
-          recognizedValues.push(SPANISH_NUM_MAP[word]);
-        } else {
-          const parsed = parseInt(word, 10);
-          if (!isNaN(parsed) && parsed >= 0 && parsed <= 15) {
-            recognizedValues.push(parsed);
+          // 5. Clinical flags
+          if (transcript.includes('sangrado') || transcript.includes('sangra') || transcript.includes('bop')) {
+            if (!executedSet.has('flag_sangrado')) {
+              executedSet.add('flag_sangrado');
+              stateRef.current.toggleFlag('sangrado');
+            }
+            continue;
+          }
+          if (transcript.includes('placa') || transcript.includes('sarro') || transcript.includes('bacteria')) {
+            if (!executedSet.has('flag_placa')) {
+              executedSet.add('flag_placa');
+              stateRef.current.toggleFlag('placa');
+            }
+            continue;
+          }
+          if (transcript.includes('supuración') || transcript.includes('supuracion') || transcript.includes('pus')) {
+            if (!executedSet.has('flag_supuracion')) {
+              executedSet.add('flag_supuracion');
+              stateRef.current.toggleFlag('supuracion');
+            }
+            continue;
+          }
+
+          // 6. Navigation
+          if (transcript.includes('siguiente') || transcript.includes('avanzar') || transcript.includes('saltar')) {
+            if (!executedSet.has('nav_next')) {
+              executedSet.add('nav_next');
+              stateRef.current.advancePosition();
+            }
+            continue;
+          }
+          if (transcript.includes('atrás') || transcript.includes('atras') || transcript.includes('anterior')) {
+            if (!executedSet.has('nav_prev')) {
+              executedSet.add('nav_prev');
+              stateRef.current.retreatPosition();
+            }
+            continue;
+          }
+
+          // 7. Check for spoken numbers with streaming consumption
+          const words = transcript.split(/\s+/);
+          const recognizedValues: number[] = [];
+
+          for (const word of words) {
+            if (SPANISH_NUM_MAP[word] !== undefined) {
+              recognizedValues.push(SPANISH_NUM_MAP[word]);
+            } else {
+              const parsed = parseInt(word, 10);
+              if (!isNaN(parsed) && parsed >= 0 && parsed <= 15) {
+                recognizedValues.push(parsed);
+              }
+            }
+          }
+
+          const appliedCount = consumedNumbersByIndex.get(i) || 0;
+          const newlyRecognized = recognizedValues.slice(appliedCount);
+
+          if (newlyRecognized.length > 0) {
+            newlyRecognized.forEach((val) => {
+              stateRef.current.applyValue(val);
+            });
+            consumedNumbersByIndex.set(i, recognizedValues.length);
+          }
+
+          // Clean up completed entries
+          if (result.isFinal) {
+            consumedNumbersByIndex.delete(i);
+            executedActionsByIndex.delete(i);
           }
         }
-      }
-
-      // If spoken one or more values, apply them sequentially
-      if (recognizedValues.length > 0) {
-        recognizedValues.forEach((val) => {
-          stateRef.current.applyValue(val);
-        });
+      } catch {
+        // Safe command parsing
       }
     };
 
     rec.onerror = (e: any) => {
-      console.warn("FastProbing voice error:", e.error);
+      const errorType = e?.error || 'unknown';
+
+      // Benign speech recognition events (silence or stopped)
+      if (errorType === 'no-speech' || errorType === 'aborted') {
+        return;
+      }
+
+      if (errorType === 'not-allowed' || errorType === 'service-not-allowed') {
+        isTerminated = true;
+        setRecognitionError("Acceso al micrófono denegado. Permite el micrófono en los ajustes de tu navegador.");
+        setIsVoiceActive(false);
+        return;
+      }
+
+      if (errorType === 'audio-capture') {
+        isTerminated = true;
+        setRecognitionError("No se detectó un micrófono disponible.");
+        setIsVoiceActive(false);
+        return;
+      }
+
+      if (errorType === 'network') {
+        isTerminated = true;
+        setRecognitionError("Error de conexión con el servicio de reconocimiento.");
+        setIsVoiceActive(false);
+        return;
+      }
+
+      isTerminated = true;
+      setRecognitionError("El dictado se detuvo temporalmente.");
+      setIsVoiceActive(false);
     };
 
     rec.onend = () => {
-      // Keep listening while modal and voice are active
-      if (isVoiceActive && isActive) {
+      consumedNumbersByIndex.clear();
+      executedActionsByIndex.clear();
+      // Keep listening while modal and voice are active and no fatal termination
+      if (!isTerminated && isVoiceActive && isActive) {
         try {
           rec.start();
-        } catch (e) {}
+        } catch {
+          isTerminated = true;
+        }
       }
     };
 
     try {
       rec.start();
-    } catch (e) {
-      console.error("Error starting continuous speech recognition:", e);
+    } catch {
+      setRecognitionError("No se pudo activar el micrófono. Verifica los permisos de tu navegador.");
+      setIsVoiceActive(false);
     }
 
     return () => {
-      try {
-        rec.stop();
-      } catch (e) {}
+      isTerminated = true;
+      if (rec) {
+        try {
+          rec.stop();
+        } catch {
+          // safe teardown
+        }
+      }
     };
   }, [isActive, isVoiceActive]);
 
@@ -509,7 +654,14 @@ export default function FastProbingBar({
             {/* Voice Dictation Switch */}
             <button
               type="button"
-              onClick={() => setIsVoiceActive(!isVoiceActive)}
+              onClick={() => {
+                if (!isVoiceActive) {
+                  setRecognitionError(null);
+                  setIsVoiceActive(true);
+                } else {
+                  setIsVoiceActive(false);
+                }
+              }}
               className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold transition-all border ${
                 isVoiceActive
                   ? 'bg-red-500/20 text-red-300 border-red-500/40 shadow-sm shadow-red-950/20 animate-pulse'
@@ -564,6 +716,23 @@ export default function FastProbingBar({
               </span>
             </div>
             <span className="text-[10px] text-emerald-400/80 font-mono hidden sm:inline">Reconocimiento Activo</span>
+          </div>
+        )}
+
+        {/* Voice Error Notice */}
+        {recognitionError && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-2.5 mb-3 flex items-center justify-between text-xs text-amber-200">
+            <div className="flex items-center gap-2">
+              <span className="text-amber-400 font-bold">⚠️ Micrófono:</span>
+              <span>{recognitionError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRecognitionError(null)}
+              className="text-[11px] font-bold text-amber-400 hover:underline cursor-pointer shrink-0"
+            >
+              Cerrar
+            </button>
           </div>
         )}
 

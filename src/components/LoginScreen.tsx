@@ -18,16 +18,21 @@ import {
   ArrowLeft,
   Check,
   AlertCircle,
-  Zap
+  Send,
+  MailCheck
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { ClinicalUser, Patient } from "../types";
 import { auth, db, cleanForFirestore } from "../firebase";
+import { safeStorage } from "../utils/safeStorage";
 import { doc, setDoc } from "firebase/firestore";
 import { encryptPatientForFirestore } from "../utils/ephiEncryption";
 import { createEmptyOdontogram, createEmptyPeriodontogram } from "../initialData";
 import CaptchaComponent from "./CaptchaComponent";
 import TwoFactorAuthStep from "./TwoFactorAuthStep";
+import { sendClinicalEmailLink } from "../services/emailLinkAuth";
+import { DEFAULT_CLINICAL_USERS, getStoredClinicalUsers, findOrRegisterClinicalUserByEmail } from "../services/clinicalUsers";
+export { DEFAULT_CLINICAL_USERS };
 import { 
   signInWithPopup, 
   GoogleAuthProvider, 
@@ -46,80 +51,9 @@ interface LoginScreenProps {
   onOpenPatientPortal?: (mode?: "lookup" | "register") => void;
 }
 
-export const DEFAULT_CLINICAL_USERS: ClinicalUser[] = [
-  {
-    id: "usr-doctor-demo",
-    name: "Dr. Alejandro Soto",
-    email: "doctor@periodash.com",
-    password: "perio",
-    profile: "particular",
-    role: "odontologo",
-    specialty: "Periodoncia e Implantología",
-    permissions: ['read_patients', 'write_patients', 'view_ephi', 'edit_ephi'],
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: "usr-admin-demo",
-    name: "Director Clínico (Admin)",
-    email: "admin@periodash.com",
-    password: "admin",
-    profile: "clinica",
-    role: "admin",
-    clinicId: "oficina_central",
-    permissions: ['read_patients', 'write_patients', 'view_ephi', 'edit_ephi', 'audit_supervision', 'manage_users'],
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: "usr-elena-demo",
-    name: "Dra. Elena Torres",
-    email: "dra.elena@periodash.com",
-    password: "elena",
-    profile: "clinica",
-    role: "supervisor",
-    clinicId: "oficina_central",
-    isSupervisor: true,
-    specialty: "Rehabilitación Oral",
-    permissions: ['read_patients', 'write_patients', 'view_ephi', 'edit_ephi', 'audit_supervision'],
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: "usr-recep-demo",
-    name: "Recepción Clínica",
-    email: "recepcion@periodash.com",
-    password: "recep",
-    profile: "clinica",
-    role: "asistente",
-    permissions: ['read_patients', 'write_patients'],
-    createdAt: new Date().toISOString()
-  }
-];
-
-// Retrieve stored clinical users from secure local session
-const getStoredUsers = (): ClinicalUser[] => {
-  const saved = localStorage.getItem("perioUsuarios");
-  if (saved) {
-    try {
-      const parsed = JSON.parse(saved) as ClinicalUser[];
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const existingEmails = new Set(parsed.map(u => u.email.toLowerCase()));
-        const merged = [...parsed];
-        for (const defU of DEFAULT_CLINICAL_USERS) {
-          if (!existingEmails.has(defU.email.toLowerCase())) {
-            merged.push(defU);
-          }
-        }
-        return merged;
-      }
-    } catch (e) {
-      // fallback
-    }
-  }
-  return DEFAULT_CLINICAL_USERS;
-};
-
 export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setDarkMode, onBackToLanding, onOpenPatientPortal }: LoginScreenProps) {
   const [activeTab, setActiveTab] = useState<"login" | "register">("login");
-  const [users, setUsers] = useState<ClinicalUser[]>(getStoredUsers);
+  const [users, setUsers] = useState<ClinicalUser[]>(getStoredClinicalUsers);
 
   // Security Verification states (CAPTCHA & 2FA)
   const [authStep, setAuthStep] = useState<"credentials" | "2fa">("credentials");
@@ -149,7 +83,7 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
 
   // Synchronize users database
   const saveUsers = (updatedUsers: ClinicalUser[]) => {
-    localStorage.setItem("perioUsuarios", JSON.stringify(updatedUsers));
+    safeStorage.setItem("perioUsuarios", JSON.stringify(updatedUsers));
     setUsers(updatedUsers);
   };
 
@@ -158,18 +92,6 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
     setIsLoading(false);
     setPending2FAUser(user);
     setAuthStep("2fa");
-  };
-
-  // 1-Click Fast Login
-  const handleQuickLogin = (user: ClinicalUser) => {
-    setIsLoading(true);
-    setLoginError(null);
-    setLoggedInUser(user);
-    setAuthSuccess(true);
-    localStorage.setItem(`2fa_trusted_${user.email}`, "true");
-    setTimeout(() => {
-      onLogin(user);
-    }, 80);
   };
 
   // Called when 2FA code is confirmed
@@ -203,62 +125,67 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
     setIsLoading(true);
 
     try {
-      // 1. Check local registered accounts first (instant match)
-      const matchedLocalUser = users.find(
-        u => u.email.toLowerCase() === emailTrim && (u.password === passwordTrim || !u.password || passwordTrim.length >= 3)
-      );
+      // 1. Check local registered accounts first (strict credential match)
+      const existingAccount = users.find(u => u.email.toLowerCase() === emailTrim);
 
-      if (matchedLocalUser) {
-        setIsLoading(false);
-        // Non-blocking Firebase Auth sync in background
-        signInWithEmailAndPassword(auth, emailTrim, passwordTrim).catch(() => {});
-        
-        // Fast-path if device was already trusted or direct login
-        const isTrusted = localStorage.getItem(`2fa_trusted_${matchedLocalUser.email}`) === "true";
-        if (isTrusted) {
-          setLoggedInUser(matchedLocalUser);
-          setAuthSuccess(true);
-          setTimeout(() => onLogin(matchedLocalUser), 80);
-        } else {
-          proceedTo2FAStep(matchedLocalUser);
+      if (existingAccount) {
+        if (!existingAccount.password) {
+          setIsLoading(false);
+          setLoginError("Esta cuenta está vinculada a un proveedor externo (Google/Apple). Por favor utilice el botón correspondiente.");
+          return;
         }
-        return;
-      }
 
-      // 2. If not matched locally, attempt Firebase Auth with quick timeout
-      let authUserUid = "";
-      try {
-        const authPromise = signInWithEmailAndPassword(auth, emailTrim, passwordTrim);
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("auth_timeout")), 1200));
-        const userCred: any = await Promise.race([authPromise, timeoutPromise]);
-        authUserUid = userCred?.user?.uid || "";
-      } catch (authErr: any) {
-        const userWithSameEmail = users.find(u => u.email.toLowerCase() === emailTrim);
-        if (userWithSameEmail && userWithSameEmail.password && userWithSameEmail.password !== passwordTrim) {
+        if (existingAccount.password !== passwordTrim) {
           setIsLoading(false);
           setLoginError("Contraseña incorrecta. Verifique sus credenciales.");
           return;
         }
+
+        // Credentials match
+        setIsLoading(false);
+        // Non-blocking Firebase Auth sync in background if supported
+        signInWithEmailAndPassword(auth, emailTrim, passwordTrim).catch(() => {});
+        
+        // Fast-path if device was already trusted within active shift
+        const trustedVal = safeStorage.getItem(`2fa_trusted_${existingAccount.email}`);
+        const trustedExpiry = parseInt(trustedVal || "0", 10);
+        const isTrusted = !isNaN(trustedExpiry) && trustedExpiry > Date.now();
+        if (isTrusted) {
+          setLoggedInUser(existingAccount);
+          setAuthSuccess(true);
+          setTimeout(() => onLogin(existingAccount), 80);
+        } else {
+          proceedTo2FAStep(existingAccount);
+        }
+        return;
       }
 
-      // 3. Resolve user profile
-      const resolvedUser: ClinicalUser = {
-        id: authUserUid || `usr-${Date.now()}`,
-        name: emailTrim.split('@')[0],
-        email: emailTrim,
-        password: passwordTrim,
-        profile: 'particular',
-        role: 'odontologo',
-        createdAt: new Date().toISOString()
-      };
-      saveUsers([...users, resolvedUser]);
+      // 2. If not matched in local cache, attempt secure Firebase Auth
+      try {
+        const userCred = await signInWithEmailAndPassword(auth, emailTrim, passwordTrim);
+        const authUser = userCred.user;
+        
+        const resolvedUser: ClinicalUser = {
+          id: authUser.uid,
+          name: authUser.displayName || emailTrim.split('@')[0],
+          email: emailTrim,
+          password: passwordTrim,
+          profile: 'particular',
+          role: 'odontologo',
+          createdAt: new Date().toISOString()
+        };
+        saveUsers([...users, resolvedUser]);
 
-      setIsLoading(false);
-      proceedTo2FAStep(resolvedUser);
-
+        setIsLoading(false);
+        proceedTo2FAStep(resolvedUser);
+      } catch (authErr: any) {
+        setIsLoading(false);
+        setLoginError("Credenciales clínicas no reconocidas. Verifique sus datos o regístrese.");
+        return;
+      }
     } catch (err: any) {
       setIsLoading(false);
-      setLoginError("Error al iniciar sesión. Verifique sus credenciales clínicas.");
+      setLoginError("Error al verificar credenciales clínicas.");
     }
   };
 
@@ -332,7 +259,7 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
       // If registered as patient (cliente), also ensure a matching patient record is generated instantly
       if (regProfile === "cliente") {
         try {
-          const localPatientsStr = localStorage.getItem("perioPatients_data");
+          const localPatientsStr = safeStorage.getItem("perioPatients_data");
           let currentPatients: Patient[] = localPatientsStr ? JSON.parse(localPatientsStr) : [];
           const alreadyExists = currentPatients.some(p => p.email?.toLowerCase() === emailTrim || p.name?.toLowerCase() === nameTrim.toLowerCase());
           if (!alreadyExists) {
@@ -384,7 +311,7 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
               payments: []
             };
             currentPatients = [newPatRecord, ...currentPatients];
-            localStorage.setItem("perioPatients_data", JSON.stringify(currentPatients));
+            safeStorage.setItem("perioPatients_data", JSON.stringify(currentPatients));
             encryptPatientForFirestore(newPatRecord)
               .then(encPayload => setDoc(doc(db, "patients", newPatRecord.id), cleanForFirestore(encPayload)))
               .catch(() => {});
@@ -421,13 +348,26 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
     setIsLoading(true);
     
     try {
-      await signInAnonymously(auth);
-      const targetUser = users.find(u => u.email === loginEmail) || users[0];
-      if (targetUser) {
+      const emailTrim = loginEmail.trim().toLowerCase();
+      if (!emailTrim) {
+        setIsLoading(false);
+        setLoginError("Ingrese su correo clínico institucional antes de usar la autenticación biométrica.");
+        return;
+      }
+
+      const targetUser = users.find(u => u.email.toLowerCase() === emailTrim);
+      if (!targetUser) {
+        setIsLoading(false);
+        setLoginError("No se encontró usuario clínico con ese correo.");
+        return;
+      }
+
+      if (typeof window !== "undefined" && window.PublicKeyCredential) {
+        // Platform biometric authenticator available
         proceedTo2FAStep(targetUser);
       } else {
         setIsLoading(false);
-        setLoginError("No se encontró usuario clínico previo en este dispositivo.");
+        setLoginError("Dispositivo biométrico (TouchID/FaceID/WebAuthn) no disponible en este navegador.");
       }
     } catch (err: any) {
       setIsLoading(false);
@@ -471,6 +411,33 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
       }
 
       setLoginError(`Fallo de conexión con ${providerName === 'google' ? 'Google' : 'Apple'}.`);
+    }
+  };
+
+  const [isSendingMagicLink, setIsSendingMagicLink] = useState(false);
+  const [magicLinkSentNotice, setMagicLinkSentNotice] = useState<string | null>(null);
+
+  const handleEmailLinkDirectLogin = async () => {
+    setLoginError(null);
+    setMagicLinkSentNotice(null);
+
+    const emailTrim = loginEmail.trim().toLowerCase();
+    if (!emailTrim || !emailTrim.includes("@")) {
+      setLoginError("Ingrese una dirección de correo válida para enviarle su enlace de acceso.");
+      return;
+    }
+
+    setIsSendingMagicLink(true);
+    const result = await sendClinicalEmailLink(emailTrim);
+    setIsSendingMagicLink(false);
+
+    if (result.success) {
+      setMagicLinkSentNotice(`¡Enlace de acceso despachado a ${emailTrim}! Revise su bandeja de entrada para ingresar directamente con un solo clic.`);
+      // Register or find user in local cache
+      const existingUser = findOrRegisterClinicalUserByEmail(emailTrim);
+      saveUsers([...users.filter(u => u.email.toLowerCase() !== emailTrim), existingUser]);
+    } else {
+      setLoginError(result.error || "No se pudo despachar el enlace por correo.");
     }
   };
 
@@ -618,6 +585,14 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
                   </div>
                 )}
 
+                {/* Magic Link Sent Notice */}
+                {magicLinkSentNotice && (
+                  <div className="p-3 bg-teal-500/10 border border-teal-500/20 text-teal-700 dark:text-teal-300 text-xs rounded-xl font-medium flex items-start gap-2">
+                    <MailCheck className="w-4 h-4 text-teal-500 shrink-0 mt-0.5" />
+                    <span>{magicLinkSentNotice}</span>
+                  </div>
+                )}
+
                 {/* Email Input */}
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 block">
@@ -697,40 +672,6 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
                   )}
                 </button>
 
-                {/* Instant 1-Click Access for Clinical Accounts */}
-                <div className={`p-3 rounded-2xl border ${darkMode ? "bg-slate-950/60 border-slate-800/80" : "bg-slate-50 border-slate-200"}`}>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400 flex items-center gap-1">
-                      <Zap className="w-3 h-3 text-amber-500 fill-amber-500" />
-                      Acceso Rápido Instantáneo
-                    </span>
-                    <span className="text-[9px] text-slate-400">1 Clic</span>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                    {DEFAULT_CLINICAL_USERS.map((defU) => (
-                      <button
-                        key={defU.id}
-                        type="button"
-                        onClick={() => handleQuickLogin(defU)}
-                        disabled={isLoading}
-                        className={`p-1.5 rounded-xl border text-[10px] font-semibold text-center transition-all cursor-pointer truncate ${
-                          darkMode
-                            ? "bg-slate-900 border-slate-800 hover:border-teal-500/50 hover:bg-slate-800 text-slate-200"
-                            : "bg-white border-slate-200 hover:border-teal-500/50 hover:bg-teal-50/50 text-slate-700 shadow-2xs"
-                        }`}
-                        title={`Ingresar inmediatamente como ${defU.name}`}
-                      >
-                        <span className="block truncate font-bold text-teal-600 dark:text-teal-400">
-                          {defU.role === 'admin' ? 'Director Admin' : defU.name.split(' ')[1] || defU.name}
-                        </span>
-                        <span className="text-[8.5px] text-slate-400 block truncate capitalize">
-                          {defU.role}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
                 {/* Social & Alternative Auth Methods */}
                 <div className="pt-2 space-y-2">
                   <div className="grid grid-cols-2 gap-2">
@@ -782,6 +723,29 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
                   >
                     <Fingerprint className="w-4 h-4 text-teal-500" />
                     <span>Huella / FaceID</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleEmailLinkDirectLogin}
+                    disabled={isLoading || isSendingMagicLink}
+                    className={`w-full py-2 px-3 rounded-xl border text-xs font-medium flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      darkMode 
+                        ? "bg-teal-950/20 border-teal-800/40 hover:bg-teal-900/30 text-teal-300" 
+                        : "bg-teal-50/60 border-teal-200 hover:bg-teal-100/60 text-teal-700"
+                    }`}
+                  >
+                    {isSendingMagicLink ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
+                        <span>Enviando enlace a tu correo...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5 text-teal-500" />
+                        <span>Acceso directo sin contraseña (Enlace a mi correo)</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </motion.form>

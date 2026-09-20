@@ -17,6 +17,7 @@ import {
   Receipt
 } from "lucide-react";
 import { PaymentTransaction, Patient } from "../types";
+import { copyToClipboardSafely } from "../utils/safeClipboard";
 
 export interface PaymentGatewayModalProps {
   patient: Patient;
@@ -75,9 +76,9 @@ export default function PaymentGatewayModal({
     }, 1800);
   };
 
-  const copyBankDetails = () => {
+  const copyBankDetails = async () => {
     const text = `Banco Santander\nTipo: Cuenta Corriente\nNº: 89012345-6\nTitular: Clínica Dental PerioDash Pro SpA\nRUT: 76.543.210-K\nEmail: pagos@periodash.cl\nMonto: $${amount.toLocaleString("es-CL")} CLP`;
-    navigator.clipboard.writeText(text);
+    await copyToClipboardSafely(text);
     setCopiedBank(true);
     setTimeout(() => setCopiedBank(false), 2000);
   };

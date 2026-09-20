@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { Search, ChevronRight, User, Calendar, Settings, X } from "lucide-react";
+import { Search, ChevronRight, User, Calendar, Settings, X, Zap, ExternalLink, Stethoscope, Camera } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Patient } from "../types";
 import { matchPatientByRut } from "../utils/rutUtils";
+import { DENTITO_APP_URL } from "../services/dentitoFinanceSync";
 
 interface SpotlightProps {
   patients: Patient[];
@@ -174,6 +175,53 @@ function SpotlightComponent({ patients, onSelectPatient, onNavigate }: Spotlight
                     </div>
                   )}
                   
+                  {query.toLowerCase().includes("sil") || query.toLowerCase().includes("mod") || query.toLowerCase().includes("cha") || query.toLowerCase().includes("voz") || query.toLowerCase().includes("cam") || query.toLowerCase().includes("son") ? (
+                    <button 
+                      onClick={() => handleAction("sillon")}
+                      className="w-full flex items-center justify-between p-3 hover:bg-teal-500/10 dark:hover:bg-teal-500/20 rounded-xl transition-all text-left border border-teal-500/20 my-1 group cursor-pointer"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-teal-500/20 text-teal-500 flex items-center justify-center font-bold">
+                          <Stethoscope className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                            <span>Modo Sillón Clínico</span>
+                            <span className="text-[9px] bg-teal-500/20 text-teal-600 dark:text-teal-400 px-1.5 py-0.2 rounded font-bold uppercase">Botones XL + Voz</span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400">Interfaz simplificada, dictado por voz y captura de fotos intraorales</div>
+                        </div>
+                      </div>
+                      <span className="text-[9px] bg-slate-100 dark:bg-slate-800 text-slate-500 px-2 py-1 rounded font-mono font-bold">
+                        Alt+S
+                      </span>
+                    </button>
+                  ) : null}
+
+                  {query.toLowerCase().includes("den") || query.toLowerCase().includes("fin") || query.toLowerCase().includes("pag") || query.toLowerCase().includes("caj") || query.toLowerCase().includes("aranc") || query.toLowerCase().includes("pos") ? (
+                    <a 
+                      href={DENTITO_APP_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setIsOpen(false)}
+                      className="w-full flex items-center justify-between p-3 hover:bg-amber-500/10 dark:hover:bg-amber-500/15 rounded-xl transition-all text-left border border-amber-500/20 my-1 group cursor-pointer"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-500 flex items-center justify-center font-bold">
+                          <Zap className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                            <span>Dentito Finance</span>
+                            <span className="text-[9px] bg-amber-500/20 text-amber-600 dark:text-amber-400 px-1.5 py-0.2 rounded font-bold uppercase">Software Externo</span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400">Abrir plataforma de finanzas, liquidaciones y aranceles dentales</div>
+                        </div>
+                      </div>
+                      <ExternalLink className="w-4 h-4 text-slate-400 group-hover:text-amber-500 transition-colors" />
+                    </a>
+                  ) : null}
+
                   {query.toLowerCase().includes("ag") || query.toLowerCase().includes("cit") ? (
                     <button 
                       onClick={() => handleAction("agenda")}

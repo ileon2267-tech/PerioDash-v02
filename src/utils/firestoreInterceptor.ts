@@ -7,6 +7,7 @@
  */
 
 import { recordHipaaAudit } from "./hipaaAudit";
+import { safeStorage } from "./safeStorage";
 
 export type ThreatType = 
   | "BURST_DOS_ATTACK" 
@@ -69,11 +70,11 @@ let totalReadsCount = 0;
 let peakBurst = 0;
 let isThrottled = false;
 
-// Load persisted incidents from local storage
+// Load persisted incidents from safe storage
 function loadStoredThreats(): FirestoreThreatIncident[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(THREAT_STORAGE_KEY);
+    const raw = safeStorage.getItem(THREAT_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed;
@@ -87,7 +88,7 @@ function loadStoredThreats(): FirestoreThreatIncident[] {
 function saveStoredThreats(threats: FirestoreThreatIncident[]): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(THREAT_STORAGE_KEY, JSON.stringify(threats.slice(0, 100)));
+    safeStorage.setItem(THREAT_STORAGE_KEY, JSON.stringify(threats.slice(0, 100)));
   } catch (e) {
     console.error("Error saving Firestore threat incidents:", e);
   }

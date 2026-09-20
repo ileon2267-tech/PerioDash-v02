@@ -22,6 +22,9 @@ import {
   setClinicMasterPassphrase,
   runEphiEncryptionBenchmark
 } from "./utils/ephiEncryption";
+import { safeStorage } from "./utils/safeStorage";
+import { checkIsEmailLinkSignIn, completeEmailLinkSignIn } from "./services/emailLinkAuth";
+import { findOrRegisterClinicalUserByEmail } from "./services/clinicalUsers";
 
 // Critical First-Paint Components (Eager Load)
 import KPIDashboard from "./components/KPIDashboard";
@@ -41,6 +44,9 @@ import { ClinicalFlowTracker } from "./components/ClinicalFlowTracker";
 import HipaaInactivityLock from "./components/HipaaInactivityLock";
 import HipaaComplianceCenter from "./components/HipaaComplianceCenter";
 import SecurityHardeningBanner from "./components/SecurityHardeningBanner";
+import AppLauncherDrawer from "./components/AppLauncherDrawer";
+import ClinicalPatientSelector from "./components/ClinicalPatientSelector";
+import VoiceCommandAssistant, { VoiceHeaderControl } from "./components/VoiceCommandAssistant";
 
 // Secondary & Auxiliary Views (Code-Split / Lazy Load for Ultra-Fast App Startup & Low Memory)
 const Agenda = lazy(() => import("./components/Agenda"));
@@ -48,6 +54,7 @@ const DentalStories = lazy(() => import("./components/DentalStories"));
 const FinanceModule = lazy(() => import("./components/FinanceModule"));
 const PrintReport = lazy(() => import("./components/PrintReport"));
 const OLearyControl = lazy(() => import("./components/OLearyControl"));
+const PSRControl = lazy(() => import("./components/PSRControl"));
 const XRayGallery = lazy(() => import("./components/XRayGallery"));
 const SoapAIAssistant = lazy(() => import("./components/SoapAIAssistant"));
 const PRARiskAssessment = lazy(() => import("./components/PRARiskAssessment"));
@@ -66,6 +73,10 @@ const IntegrationsHub = lazy(() => import("./components/IntegrationsHub"));
 const PrescriptionAndReferralModal = lazy(() => import("./components/PrescriptionAndReferralModal"));
 const PeriodontogramComparisonModal = lazy(() => import("./components/PeriodontogramComparisonModal"));
 const KioskModeModal = lazy(() => import("./components/KioskModeModal"));
+const PatientPresentationMode = lazy(() => import("./components/PatientPresentationMode"));
+const InteractiveTourModal = lazy(() => import("./components/InteractiveTourModal"));
+const ChairModeModal = lazy(() => import("./components/ChairModeModal"));
+import ClinicalNotificationCenter from "./components/ClinicalNotificationCenter";
 
 // Ultra-lightweight Clinical Suspense Skeleton
 function ClinicalViewSkeleton() {
@@ -87,6 +98,9 @@ function ClinicalViewSkeleton() {
   );
 }
 
+
+import GmailCenterModal from "./components/GmailCenterModal";
+import { isGmailConnected } from "./services/gmailService";
 
 // Icons from Lucide-React
 import { 
@@ -133,17 +147,26 @@ import {
   History,
   Tablet,
   QrCode,
-  FileSignature
+  FileSignature,
+  Mail,
+  Bell,
+  Compass,
+  Zap,
+  ExternalLink,
+  Mic,
+  MicOff,
+  LayoutGrid
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { DENTITO_APP_URL } from "./services/dentitoFinanceSync";
 
 type ActiveTab = "dashboard" | "flujo" | "clinica" | "agenda" | "finanzas" | "dentalstories" | "reportes" | "pacientes" | "ajustes" | "tienda" | "bolsa-empleo";
 
 export default function App() {
   // Session Authentication State
   const [activeUser, setActiveUser] = useState<ClinicalUser | null>(() => {
-    const saved = localStorage.getItem("perioActiveUser");
-    if (saved && localStorage.getItem("perioLoggedIn") === "true") {
+    const saved = safeStorage.getItem("perioActiveUser");
+    if (saved && safeStorage.getItem("perioLoggedIn") === "true") {
       try {
         return JSON.parse(saved);
       } catch (e) {
@@ -159,33 +182,122 @@ export default function App() {
   const [showLandingModal, setShowLandingModal] = useState<boolean>(false);
   const [ajustesSubTab, setAjustesSubTab] = useState<"integraciones" | "general" | "aranceles" | "backup" | "seguridad">("integraciones");
   const [showSecurityModal, setShowSecurityModal] = useState<boolean>(false);
+  const [showChairMode, setShowChairMode] = useState<boolean>(false);
+  const [handsFreeVoiceActive, setHandsFreeVoiceActive] = useState<boolean>(() => {
+    return safeStorage.getItem("perioHandsFreeVoice") === "true";
+  });
+  const [speechSupported, setSpeechSupported] = useState<boolean>(true);
+  const [showAppLauncher, setShowAppLauncher] = useState<boolean>(false);
+  const appLauncherRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showAppLauncher) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        !target.closest("#cajon-de-aplicaciones-container") &&
+        !target.closest("#cajon-de-aplicaciones-mobile-container") &&
+        !target.closest("#cajon-de-aplicaciones-popover")
+      ) {
+        setShowAppLauncher(false);
+      }
+    };
+    const handleTouchOutside = (e: TouchEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        !target.closest("#cajon-de-aplicaciones-container") &&
+        !target.closest("#cajon-de-aplicaciones-mobile-container") &&
+        !target.closest("#cajon-de-aplicaciones-popover")
+      ) {
+        setShowAppLauncher(false);
+      }
+    };
+    window.addEventListener("mousedown", handleClickOutside);
+    window.addEventListener("touchend", handleTouchOutside);
+    return () => {
+      window.removeEventListener("mousedown", handleClickOutside);
+      window.removeEventListener("touchend", handleTouchOutside);
+    };
+  }, [showAppLauncher]);
+
+  // Handle Firebase Email Link (Passwordless) authentication when returning via email link
+  useEffect(() => {
+    if (checkIsEmailLinkSignIn()) {
+      completeEmailLinkSignIn().then((res) => {
+        if (res.success && res.email) {
+          const user = findOrRegisterClinicalUserByEmail(res.email, res.uid);
+          handleLoginSuccess(user);
+        } else if (res.error) {
+          console.warn("Fallo al autenticar enlace de correo:", res.error);
+        }
+      });
+    }
+  }, []);
+
+  // Soft clinical audio confirmation for hands-free wake command (D5 -> A5)
+  const playVoiceWakeChime = useCallback(() => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+
+      // Tone 1: 587.33 Hz (D5)
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = "sine";
+      osc1.frequency.setValueAtTime(587.33, now);
+      gain1.gain.setValueAtTime(0.08, now);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.18);
+
+      // Tone 2: 880 Hz (A5)
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = "sine";
+      osc2.frequency.setValueAtTime(880, now + 0.12);
+      gain2.gain.setValueAtTime(0.12, now + 0.12);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.12);
+      osc2.stop(now + 0.35);
+    } catch {
+      // safe fallback
+    }
+  }, []);
 
   // HIPAA Security & Privacy Controls State
   const [showHipaaCenter, setShowHipaaCenter] = useState<boolean>(false);
   const [privacyMode, setPrivacyMode] = useState<boolean>(() => {
-    return localStorage.getItem("perioPrivacyMode") === "true";
+    return safeStorage.getItem("perioPrivacyMode") === "true";
   });
   const [inactivityMinutes, setInactivityMinutes] = useState<number>(() => {
-    const saved = localStorage.getItem("perioInactivityMinutes");
+    const saved = safeStorage.getItem("perioInactivityMinutes");
     return saved ? parseInt(saved, 10) : 15;
   });
 
   const handleTogglePrivacyMode = useCallback(() => {
     setPrivacyMode(prev => {
       const next = !prev;
-      localStorage.setItem("perioPrivacyMode", String(next));
+      safeStorage.setItem("perioPrivacyMode", String(next));
       return next;
     });
   }, []);
 
   const handleChangeInactivityMinutes = useCallback((mins: number) => {
     setInactivityMinutes(mins);
-    localStorage.setItem("perioInactivityMinutes", String(mins));
+    safeStorage.setItem("perioInactivityMinutes", String(mins));
   }, []);
 
   const handleLoginSuccess = (user: ClinicalUser) => {
-    localStorage.setItem("perioLoggedIn", "true");
-    localStorage.setItem("perioActiveUser", JSON.stringify(user));
+    safeStorage.setItem("perioLoggedIn", "true");
+    safeStorage.setItem("perioActiveUser", JSON.stringify(user));
     setActiveUser(user);
     
     // Set appropriate doctor name and clinical setting indicators
@@ -226,14 +338,14 @@ export default function App() {
         severity: "info"
       });
     }
-    localStorage.setItem("perioLoggedIn", "false");
-    localStorage.removeItem("perioActiveUser");
+    safeStorage.setItem("perioLoggedIn", "false");
+    safeStorage.removeItem("perioActiveUser");
     setActiveUser(null);
   };
 
   // Customizable tariffs for professional (aranceles)
   const [aranceles, setAranceles] = useState<Record<string, number>>(() => {
-    const saved = localStorage.getItem("perioAranceles");
+    const saved = safeStorage.getItem("perioAranceles");
     return saved ? JSON.parse(saved) : {
       "Limpieza Profiláctica": 45000,
       "Raspado Radicular por Sector": 65000,
@@ -244,7 +356,7 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem("perioAranceles", JSON.stringify(aranceles));
+    safeStorage.setItem("perioAranceles", JSON.stringify(aranceles));
   }, [aranceles]);
 
   // Initial Doctor defaults when activeUser is restored from localStorage
@@ -259,13 +371,13 @@ export default function App() {
 
   // Theme state
   const [darkMode, setDarkMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem("perioTheme");
+    const saved = safeStorage.getItem("perioTheme");
     return saved === null ? true : saved === "dark";
   });
 
   // Client and Clinical records states
   const [patients, setPatients] = useState<Patient[]>(() => {
-    const saved = localStorage.getItem("perioPatients");
+    const saved = safeStorage.getItem("perioPatients");
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -278,7 +390,7 @@ export default function App() {
   });
 
   const [appointments, setAppointments] = useState<Appointment[]>(() => {
-    const saved = localStorage.getItem("perioAppointments");
+    const saved = safeStorage.getItem("perioAppointments");
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -290,17 +402,16 @@ export default function App() {
     return INITIAL_APPOINTMENTS;
   });
 
-  const [activePatientId, setActivePatientId] = useState<string>(() => {
-    const saved = localStorage.getItem("perioActivePatientId");
-    return saved || ""; // No default patient selected initially
-  });
+  // No patient is selected by default; user explicitly chooses who to treat
+  const [activePatientId, setActivePatientId] = useState<string>("");
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("dashboard");
-  const [clinicalSubView, setClinicalSubView] = useState<"ficha" | "odontograma" | "periodontograma" | "pra" | "oleary" | "xrays" | "soap" | "presupuesto" | "especialidad">("ficha");
+  const [clinicalSubView, setClinicalSubView] = useState<"ficha" | "odontograma" | "periodontograma" | "psr" | "pra" | "oleary" | "xrays" | "soap" | "presupuesto" | "especialidad">("ficha");
   const [showShareModal, setShowShareModal] = useState(false);
   const [showPrescriptionModal, setShowPrescriptionModal] = useState(false);
   const [showPeriodontoComparison, setShowPeriodontoComparison] = useState(false);
   const [showKioskModal, setShowKioskModal] = useState(false);
+  const [showGmailModal, setShowGmailModal] = useState(false);
   const [deletingPatientId, setDeletingPatientId] = useState<string | null>(null);
 
   // Doctor's custom metadata states
@@ -308,20 +419,24 @@ export default function App() {
   const [clinicName, setClinicName] = useState("PerioClinic Providencia");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isClinicalSidebarCollapsed, setIsClinicalSidebarCollapsed] = useState<boolean>(() => {
-    return localStorage.getItem("perioClinicalSidebarCollapsed") === "true";
+    return safeStorage.getItem("perioClinicalSidebarCollapsed") === "true";
   });
   const [isZenMode, setIsZenMode] = useState<boolean>(() => {
-    return localStorage.getItem("perioZenMode") === "true";
+    return safeStorage.getItem("perioZenMode") === "true";
   });
 
   // Onboarding, Help Panel & Shortcuts Modal States
   const [learningMode, setLearningMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem("perioLearningMode");
+    const saved = safeStorage.getItem("perioLearningMode");
     return saved === "true"; // defaults to false for new users
   });
   const [showHelpPanel, setShowHelpPanel] = useState<boolean>(false);
   const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState<boolean>(false);
+  const [showPatientPresentation, setShowPatientPresentation] = useState<boolean>(false);
+  const [showInteractiveTour, setShowInteractiveTour] = useState<boolean>(() => {
+    return safeStorage.getItem("perio_tour_completed") !== "true" && safeStorage.getItem("perioTourSeenOnce") !== "true";
+  });
 
   // Smooth scroll to top when switching main tabs or clinical subviews for fluid UX
   useEffect(() => {
@@ -337,6 +452,9 @@ export default function App() {
         setDeletingPatientId(null);
         setShowHelpPanel(false);
         setIsMobileDrawerOpen(false);
+        setShowPatientPresentation(false);
+        setShowInteractiveTour(false);
+        setShowChairMode(false);
         return;
       }
 
@@ -369,6 +487,9 @@ export default function App() {
         e.preventDefault();
         setActiveTab("clinica");
         setClinicalSubView("odontograma");
+      } else if (e.altKey && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        setShowChairMode((prev) => !prev);
       }
     };
 
@@ -377,7 +498,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("perioLearningMode", String(learningMode));
+    safeStorage.setItem("perioLearningMode", String(learningMode));
   }, [learningMode]);
 
   const effectiveSidebarCollapsed = isZenMode ? true : isSidebarCollapsed;
@@ -386,7 +507,7 @@ export default function App() {
   const toggleClinicalSidebar = () => {
     setIsClinicalSidebarCollapsed(prev => {
       const next = !prev;
-      localStorage.setItem("perioClinicalSidebarCollapsed", String(next));
+      safeStorage.setItem("perioClinicalSidebarCollapsed", String(next));
       return next;
     });
   };
@@ -417,25 +538,58 @@ export default function App() {
   const prevPatientsRef = useRef<Patient[]>([]);
   const prevAppointmentsRef = useRef<Appointment[]>([]);
 
-  // Auto-select first patient if activeTab === "clinica" and activePatientId is missing
-  useEffect(() => {
-    if (activeTab === "clinica" && !activePatientId && patients.length > 0) {
-      setActivePatientId(patients[0].id);
-    }
-  }, [activeTab, activePatientId, patients]);
-
   // Navigation scroll ref
-  const [isAlertsCollapsed, setIsAlertsCollapsed] = useState(false);
+  const [isAlertsCollapsed, setIsAlertsCollapsed] = useState(() => {
+    if (typeof window !== "undefined") {
+      return window.innerWidth < 768;
+    }
+    return false;
+  });
   const clinicalNavRef = useRef<HTMLDivElement>(null);
+  const [canScrollNavLeft, setCanScrollNavLeft] = useState(false);
+  const [canScrollNavRight, setCanScrollNavRight] = useState(false);
+
+  const checkNavScroll = useCallback(() => {
+    if (clinicalNavRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = clinicalNavRef.current;
+      setCanScrollNavLeft(scrollLeft > 6);
+      setCanScrollNavRight(scrollLeft < scrollWidth - clientWidth - 6);
+    }
+  }, []);
+
   const scrollClinicalNav = (direction: "left" | "right") => {
     if (clinicalNavRef.current) {
-      const scrollAmount = 300;
+      const scrollAmount = 260;
       clinicalNavRef.current.scrollBy({
         left: direction === "left" ? -scrollAmount : scrollAmount,
         behavior: "smooth"
       });
+      setTimeout(checkNavScroll, 320);
     }
   };
+
+  useEffect(() => {
+    checkNavScroll();
+    const navEl = clinicalNavRef.current;
+    if (navEl) {
+      navEl.addEventListener("scroll", checkNavScroll, { passive: true });
+      window.addEventListener("resize", checkNavScroll);
+      return () => {
+        navEl.removeEventListener("scroll", checkNavScroll);
+        window.removeEventListener("resize", checkNavScroll);
+      };
+    }
+  }, [checkNavScroll, isZenMode]);
+
+  useEffect(() => {
+    if (clinicalNavRef.current) {
+      const activeEl = clinicalNavRef.current.querySelector<HTMLElement>('[data-active-station="true"]');
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+      }
+      setTimeout(checkNavScroll, 350);
+    }
+  }, [clinicalSubView, checkNavScroll]);
 
   // Authenticate with Firebase on startup so that we can read/write to Firestore securely
   useEffect(() => {
@@ -458,6 +612,13 @@ export default function App() {
   useEffect(() => {
     let isCancelled = false;
     async function testConnection() {
+      if (!auth.currentUser) {
+        try {
+          await signInAnonymously(auth);
+        } catch {
+          // Fallback seguro
+        }
+      }
       for (let attempt = 0; attempt < 3; attempt++) {
         if (isCancelled) return;
         try {
@@ -478,8 +639,13 @@ export default function App() {
     if (isAuthReady) {
       testConnection();
     }
+    const handleOnline = () => {
+      testConnection();
+    };
+    window.addEventListener('online', handleOnline);
     return () => {
       isCancelled = true;
+      window.removeEventListener('online', handleOnline);
     };
   }, [isAuthReady]);
 
@@ -607,7 +773,7 @@ export default function App() {
     // Asynchronously debounced local storage backup (always fast)
     const localTimer = setTimeout(() => {
       try {
-        localStorage.setItem("perioPatients", JSON.stringify(patients));
+        safeStorage.setItem("perioPatients", JSON.stringify(patients));
       } catch (e) {
         console.warn("Storage quota warning:", e);
       }
@@ -669,7 +835,7 @@ export default function App() {
     // Asynchronously debounced local storage backup
     const localTimer = setTimeout(() => {
       try {
-        localStorage.setItem("perioAppointments", JSON.stringify(appointments));
+        safeStorage.setItem("perioAppointments", JSON.stringify(appointments));
       } catch (e) {
         console.warn("Storage quota warning:", e);
       }
@@ -730,18 +896,23 @@ export default function App() {
   const handleManualSync = useCallback(async () => {
     setIsSyncingFirebase(true);
     try {
-      if (auth.currentUser) {
-        for (const p of patients) {
-          const encryptedPayload = await encryptPatientForFirestore(p);
-          await setDoc(doc(db, "patients", p.id), cleanForFirestore(encryptedPayload));
+      if (!auth.currentUser) {
+        try {
+          await signInAnonymously(auth);
+        } catch {
+          // Si falla auth anónimo, continuar
         }
-        for (const app of appointments) {
-          const encryptedPayload = await encryptAppointmentForFirestore(app);
-          await setDoc(doc(db, "appointments", app.id), cleanForFirestore(encryptedPayload));
-        }
-        setLastSyncedTime(new Date());
-        setFirebaseSyncError(null);
       }
+      for (const p of patients) {
+        const encryptedPayload = await encryptPatientForFirestore(p);
+        await setDoc(doc(db, "patients", p.id), cleanForFirestore(encryptedPayload));
+      }
+      for (const app of appointments) {
+        const encryptedPayload = await encryptAppointmentForFirestore(app);
+        await setDoc(doc(db, "appointments", app.id), cleanForFirestore(encryptedPayload));
+      }
+      setLastSyncedTime(new Date());
+      setFirebaseSyncError(null);
     } catch (err: any) {
       console.warn("Manual sync error:", err);
     } finally {
@@ -749,12 +920,13 @@ export default function App() {
     }
   }, [patients, appointments]);
 
+  // Clear any legacy persisted patient ID so the platform opens clean without auto-selecting a patient
   useEffect(() => {
-    localStorage.setItem("perioActivePatientId", activePatientId);
-  }, [activePatientId]);
+    safeStorage.removeItem("perioActivePatientId");
+  }, []);
 
   useEffect(() => {
-    localStorage.setItem("perioTheme", darkMode ? "dark" : "light");
+    safeStorage.setItem("perioTheme", darkMode ? "dark" : "light");
     if (darkMode) document.documentElement.classList.add("dark");
     else document.documentElement.classList.remove("dark");
   }, [darkMode]);
@@ -763,8 +935,16 @@ export default function App() {
     const handleNavigateEvent = (e: any) => {
       if (e.detail) {
         if (typeof e.detail === "string") {
+          if (e.detail === "sillon" || e.detail === "modo-sillon") {
+            setShowChairMode(true);
+            return;
+          }
           setActiveTab(e.detail as any);
         } else if (typeof e.detail === "object") {
+          if (e.detail.tab === "sillon" || e.detail.tab === "modo-sillon") {
+            setShowChairMode(true);
+            return;
+          }
           if (e.detail.tab) setActiveTab(e.detail.tab);
           if (e.detail.subView) setClinicalSubView(e.detail.subView);
         }
@@ -776,21 +956,29 @@ export default function App() {
     const handleToggleLearningEvent = () => {
       setLearningMode(prev => !prev);
     };
+    const handleOpenChairMode = () => {
+      setShowChairMode(true);
+    };
+
     window.addEventListener("periodash-navigate", handleNavigateEvent);
     window.addEventListener("periodash-open-help", handleOpenHelpEvent);
     window.addEventListener("periodash-toggle-learning", handleToggleLearningEvent);
+    window.addEventListener("periodash-open-chair-mode", handleOpenChairMode);
     return () => {
       window.removeEventListener("periodash-navigate", handleNavigateEvent);
       window.removeEventListener("periodash-open-help", handleOpenHelpEvent);
       window.removeEventListener("periodash-toggle-learning", handleToggleLearningEvent);
+      window.removeEventListener("periodash-open-chair-mode", handleOpenChairMode);
     };
   }, []);
+
+  // Ambient Hands-Free Voice Control is powered by VoiceCommandAssistant component below.
 
   // Auto Zen Mode for Complex Clinical Views
   useEffect(() => {
     if (clinicalSubView === "odontograma" || clinicalSubView === "periodontograma") {
       setIsZenMode(true);
-      localStorage.setItem("perioZenMode", "true");
+      safeStorage.setItem("perioZenMode", "true");
       setIsSidebarCollapsed(true);
       setIsClinicalSidebarCollapsed(true);
     }
@@ -946,7 +1134,7 @@ export default function App() {
 
   const renderWorkspace = () => {
     return (
-      <div className="space-y-6 animate-fade-in" id="clinical-area">
+      <div className="flex flex-col gap-3.5 sm:gap-4 animate-fade-in w-full transition-all" id="clinical-area">
             {/* Active Patient Bar (Compact & Responsive) */}
             {isZenMode ? (
               /* Ultra-compact 1-line bar for Zen Mode / Full Screen */
@@ -984,6 +1172,7 @@ export default function App() {
                     <option value="especialidad">Especialidades</option>
                     <option value="odontograma">Odontograma</option>
                     <option value="periodontograma">Periodontograma</option>
+                    <option value="psr">Sondaje PSR (OMS)</option>
                     <option value="pra">Riesgo PRA</option>
                     <option value="oleary">Índice O'Leary</option>
                     <option value="xrays">Tomografías</option>
@@ -991,21 +1180,56 @@ export default function App() {
                     <option value="presupuesto">Presupuestos</option>
                   </select>
 
+                  {activePatient && (
+                    <button
+                      type="button"
+                      onClick={() => setActivePatientId("")}
+                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-teal-300 rounded-lg border border-teal-500/30 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-all shrink-0"
+                      title="Elegir o cambiar paciente a tratar"
+                    >
+                      <Users className="w-3 h-3 text-teal-400" />
+                      <span className="hidden md:inline">Cambiar</span>
+                    </button>
+                  )}
+
                   <select
                     value={activePatientId}
                     onChange={(e) => setActivePatientId(e.target.value)}
                     className="text-[11px] py-1 px-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 font-medium outline-none cursor-pointer max-w-[130px] sm:max-w-none"
                   >
-                    <option value="">Buscar expediente...</option>
+                    <option value="">-- Elegir paciente... --</option>
                     {patients.map((p) => (
                       <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
                   </select>
 
+                  {activePatient && (
+                    <button
+                      onClick={() => setShowPatientPresentation(true)}
+                      className="px-2.5 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 rounded-lg border border-emerald-500/40 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-all"
+                      title="Vista Explicativa al Paciente"
+                    >
+                      <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="hidden sm:inline">Vista Paciente</span>
+                    </button>
+                  )}
+
+                  {/* Direct Shortcut to Dentito Finance */}
+                  <a
+                    href={DENTITO_APP_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded-lg border border-amber-500/40 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-all"
+                    title="Acceso directo a Dentito Finance (Motor financiero odontológico)"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="hidden sm:inline">Dentito Finance</span>
+                  </a>
+
                   <button
                     onClick={() => {
                       setIsZenMode(false);
-                      localStorage.setItem("perioZenMode", "false");
+                      safeStorage.setItem("perioZenMode", "false");
                       setIsSidebarCollapsed(false);
                       setIsClinicalSidebarCollapsed(false);
                     }}
@@ -1019,36 +1243,49 @@ export default function App() {
               </div>
             ) : (
               /* Sleek Compact Horizontal Bar for Standard Mode */
-              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 p-3 sm:px-4 sm:py-3 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 shadow-xs">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-9 h-9 bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 rounded-xl flex items-center justify-center font-display font-bold text-base shadow-xs border border-teal-100 dark:border-teal-900/40 shrink-0">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 p-2 sm:px-4 sm:py-2.5 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-2.5 sm:gap-3 shadow-xs">
+                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 w-full lg:w-auto">
+                  <div className="w-8 h-8 sm:w-9 sm:h-9 bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 rounded-xl flex items-center justify-center font-display font-bold text-sm sm:text-base shadow-xs border border-teal-100 dark:border-teal-900/40 shrink-0">
                     {activePatient ? activePatient.name.charAt(0) : "?"}
                   </div>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 sm:gap-2">
                       <h2 className="text-sm sm:text-base font-display font-bold text-slate-900 dark:text-white leading-tight truncate">
                         {activePatient ? activePatient.name : "Seleccionar Paciente"}
                       </h2>
-                      {activePatient && (
-                        <div className="flex items-center gap-1">
+                      {activePatient && activePatient.flowStatus && (
+                        <span className={`px-2 py-0.5 text-[9.5px] sm:text-[10px] font-extrabold rounded-md uppercase tracking-wider shrink-0 ${
+                          activePatient.flowStatus === 'en_sillon'
+                            ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                            : activePatient.flowStatus === 'espera'
+                            ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30'
+                            : activePatient.flowStatus === 'atendido'
+                            ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30'
+                            : 'bg-teal-500/15 text-teal-700 dark:text-teal-300 border border-teal-500/30'
+                        }`}>
+                          {activePatient.flowStatus === 'en_sillon' ? `En Sillón` : activePatient.flowStatus === 'espera' ? 'En Espera' : activePatient.flowStatus === 'atendido' ? 'Atendido' : 'Completado'}
+                        </span>
+                      )}
+                      {/* Non-redundant quick alert badge on large screens; detailed alerts managed by radar strip */}
+                      {activePatient && (activePatient.anamnesis.hta || activePatient.anamnesis.diabetes) && (
+                        <div className="hidden xl:flex items-center gap-1 shrink-0">
                           {activePatient.anamnesis.hta && (
-                            <span className="px-1.5 py-0.5 text-[8.5px] font-black uppercase bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded border border-rose-500/20" title="Hipertensión Arterial">HTA</span>
+                            <span className="px-1.5 py-0.2 text-[8px] font-black uppercase bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded border border-rose-500/20" title="Hipertensión Arterial">HTA</span>
                           )}
                           {activePatient.anamnesis.diabetes && (
-                            <span className="px-1.5 py-0.5 text-[8.5px] font-black uppercase bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded border border-amber-500/20" title="Diabetes Mellitus">DBT</span>
-                          )}
-                          {activePatient.anamnesis.tabaquismo > 0 && (
-                            <span className="px-1.5 py-0.5 text-[8.5px] font-black uppercase bg-slate-500/10 text-slate-600 dark:text-slate-300 rounded border border-slate-500/20" title={`Tabaquismo: ${activePatient.anamnesis.tabaquismo} cig/día`}>TBQ</span>
-                          )}
-                          {activePatient.anamnesis.alergias && (
-                            <span className="px-1.5 py-0.5 text-[8.5px] font-black uppercase bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 rounded border border-yellow-500/20 max-w-[80px] truncate" title={`Alergias: ${activePatient.anamnesis.alergias}`}>ALG</span>
+                            <span className="px-1.5 py-0.2 text-[8px] font-black uppercase bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded border border-amber-500/20" title="Diabetes Mellitus">DBT</span>
                           )}
                         </div>
                       )}
                     </div>
                     <div className="text-[11px] text-slate-400 mt-0.5 font-normal truncate">
                       {activePatient ? (
-                        <span>{activePatient.rut ? <strong className="font-mono text-teal-600 dark:text-teal-400 mr-1.5">RUT: {activePatient.rut} •</strong> : null}Exp. #{activePatient.id} • 📞 {activePatient.phone} • 🎂 {activePatient.birthdate}</span>
+                        <span>
+                          {activePatient.rut ? <strong className="font-mono text-teal-600 dark:text-teal-400 mr-1.5">RUT: {activePatient.rut} •</strong> : null}
+                          Exp. #{activePatient.id} • 📞 {activePatient.phone}
+                          <span className="hidden sm:inline"> • 🎂 {activePatient.birthdate}</span>
+                          {activePatient.email && <span className="hidden md:inline"> • ✉️ {activePatient.email}</span>}
+                        </span>
                       ) : (
                         "Selecciona un expediente para comenzar la sesión clínica"
                       )}
@@ -1056,14 +1293,26 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Patient Selections & Quick Actions */}
-                <div className="flex flex-wrap gap-2 items-center w-full md:w-auto justify-end">
+                {/* Patient Selections & Quick Actions (Auto-collapsing single row) */}
+                <div className="flex items-center gap-1.5 sm:gap-2 w-full lg:w-auto justify-between lg:justify-end shrink-0 clinical-actions-row">
+                  {activePatient && (
+                    <button
+                      type="button"
+                      onClick={() => setActivePatientId("")}
+                      className="px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700 active:scale-95 shrink-0 shadow-2xs"
+                      title="Volver al selector de pacientes para elegir otro expediente"
+                    >
+                      <Users className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                      <span className="hidden sm:inline">Cambiar Paciente</span>
+                    </button>
+                  )}
+
                   <select
                     value={activePatientId}
                     onChange={(e) => setActivePatientId(e.target.value)}
-                    className="flex-1 md:flex-initial text-xs py-1.5 px-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-teal-500/25 outline-none cursor-pointer"
+                    className="flex-1 lg:flex-initial text-xs py-1.5 px-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-teal-500/25 outline-none cursor-pointer max-w-[150px] sm:max-w-[200px] truncate"
                   >
-                    <option value="">Buscar expediente...</option>
+                    <option value="">-- Elegir paciente... --</option>
                     {patients.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name} {p.rut ? `(${p.rut})` : `(ID: ${p.id.split('-')[1] || p.id})`}
@@ -1075,7 +1324,7 @@ export default function App() {
                     onClick={() => {
                       const nextZen = !isZenMode;
                       setIsZenMode(nextZen);
-                      localStorage.setItem("perioZenMode", String(nextZen));
+                      safeStorage.setItem("perioZenMode", String(nextZen));
                       if (nextZen) {
                         setIsSidebarCollapsed(true);
                         setIsClinicalSidebarCollapsed(true);
@@ -1084,7 +1333,7 @@ export default function App() {
                         setIsClinicalSidebarCollapsed(false);
                       }
                     }}
-                    className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer border ${
+                    className={`px-2.5 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer border shrink-0 ${
                       isZenMode
                         ? "bg-emerald-500/10 hover:bg-emerald-500/15 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
                         : "bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700/85 text-slate-700 dark:text-slate-300 border-transparent"
@@ -1092,59 +1341,102 @@ export default function App() {
                     title={isZenMode ? "Desactivar Modo Zen" : "Activar Modo Zen (Espacio Completo)"}
                   >
                     <Columns className={`w-3.5 h-3.5 transition-transform duration-300 ${isZenMode ? "rotate-90 text-emerald-500" : "text-slate-400"}`} />
-                    <span>{isZenMode ? "Modo Zen" : "Pantalla Completa"}</span>
+                    <span className="hidden xl:inline">{isZenMode ? "Modo Zen" : "Pantalla Completa"}</span>
                   </button>
 
-                  <button
-                    onClick={() => setActiveTab("reportes")}
-                    className="p-1.5 sm:px-2.5 sm:py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/65 dark:text-indigo-400 rounded-xl border border-indigo-200 dark:border-indigo-800/60 transition-all cursor-pointer shadow-xs flex items-center gap-1.5 text-xs font-bold"
-                    title="Configurar y Generar Reporte A4"
-                  >
-                    <Printer className="w-3.5 h-3.5" />
-                    <span className="hidden xs:inline">Reporte A4</span>
-                  </button>
+                  {/* Secondary buttons - responsive labels auto-collapse on reduced width */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {activePatient && (
+                      <button
+                        onClick={() => setShowPatientPresentation(true)}
+                        className="p-1.5 sm:px-2.5 sm:py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 dark:text-emerald-300 rounded-xl border border-emerald-300 dark:border-emerald-700/60 transition-all cursor-pointer shadow-xs flex items-center gap-1.5 text-xs font-bold"
+                        title="Vista Explicativa al Paciente (Modo Presentación)"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                        <span className="hidden xl:inline">Vista Paciente</span>
+                      </button>
+                    )}
 
-                  <button
-                    onClick={() => setShowShareModal(true)}
-                    className="px-2.5 py-1.5 bg-teal-50 dark:bg-teal-950/40 hover:bg-teal-100 dark:hover:bg-teal-900/60 text-teal-600 dark:text-teal-400 font-extrabold text-xs rounded-xl border border-teal-500/40 dark:border-teal-400/50 transition-all flex items-center gap-1.5 cursor-pointer"
-                    title="Generar Enlace Seguro"
-                  >
-                    <Share2 className="w-3.5 h-3.5 text-teal-500" />
-                    <span className="hidden xs:inline">Compartir</span>
-                  </button>
+                    <button
+                      onClick={() => setActiveTab("reportes")}
+                      className="p-1.5 sm:px-2.5 sm:py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/65 dark:text-indigo-400 rounded-xl border border-indigo-200 dark:border-indigo-800/60 transition-all cursor-pointer shadow-xs flex items-center gap-1.5 text-xs font-bold"
+                      title="Configurar y Generar Reporte A4"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span className="hidden xl:inline">Reporte</span>
+                    </button>
+
+                    <button
+                      onClick={() => setShowShareModal(true)}
+                      className="p-1.5 sm:px-2.5 sm:py-1.5 bg-teal-50 dark:bg-teal-950/40 hover:bg-teal-100 dark:hover:bg-teal-900/60 text-teal-600 dark:text-teal-400 font-extrabold text-xs rounded-xl border border-teal-500/40 dark:border-teal-400/50 transition-all flex items-center gap-1.5 cursor-pointer"
+                      title="Generar Enlace Seguro"
+                    >
+                      <Share2 className="w-3.5 h-3.5 text-teal-500" />
+                      <span className="hidden xl:inline">Compartir</span>
+                    </button>
+
+                    {/* Direct Shortcut to Dentito Finance */}
+                    <a
+                      href={DENTITO_APP_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1.5 sm:px-2.5 sm:py-1.5 bg-gradient-to-r from-amber-500/10 to-teal-500/10 hover:from-amber-500/20 hover:to-teal-500/20 text-slate-800 dark:text-slate-100 font-bold text-xs rounded-xl border border-amber-500/30 dark:border-amber-500/40 transition-all flex items-center gap-1.5 cursor-pointer shadow-xs group"
+                      title="Acceso directo a Dentito Finance (Motor financiero odontológico)"
+                    >
+                      <Zap className="w-3.5 h-3.5 text-amber-500 group-hover:scale-110 transition-transform shrink-0" />
+                      <span className="hidden xl:inline">Dentito Finance</span>
+                      <ExternalLink className="w-3 h-3 text-slate-400 hidden xl:inline" />
+                    </a>
+                  </div>
                 </div>
               </div>
             )}
 
             {activePatient ? (
-              <div className="space-y-4 font-display">
+              <div className="space-y-3 font-display">
                 
                 {/* Clinical Alerts and Systemic Highlights Strip */}
                 {!isZenMode && (
-                  <div className="bg-slate-50/90 dark:bg-slate-900/80 backdrop-blur-md rounded-2xl border border-slate-200/80 dark:border-slate-800/80 p-3.5 transition-all shadow-xs">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2.5">
-                        <div className="p-2 bg-teal-500/10 rounded-xl border border-teal-500/20">
-                          <ShieldCheck className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                  <div className="bg-slate-50/90 dark:bg-slate-900/80 backdrop-blur-md rounded-2xl border border-slate-200/80 dark:border-slate-800/80 p-2 sm:p-2.5 transition-all shadow-xs">
+                    <div className="flex items-center justify-between gap-2 overflow-hidden">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="p-1.5 bg-teal-500/10 rounded-xl border border-teal-500/20 shrink-0">
+                          <ShieldCheck className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
                         </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 leading-none">Radar de Alertas Sistémicas</h4>
-                            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 truncate">
+                            <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 leading-none">Radar Alertas</h4>
+                            <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20 truncate max-w-[120px]">
                               {activePatient.name}
                             </span>
                           </div>
-                          <p className="text-[10.5px] text-slate-500 dark:text-slate-400 font-medium mt-1 hidden sm:block">
-                            Condiciones sistémicas y alertas de riesgo directo para procedimientos odontológicos.
+                          <p className="clinical-desc-truncate clinical-alerts-verbose text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5 hidden md:block truncate">
+                            Condiciones sistémicas y alertas de riesgo directo para procedimientos.
                           </p>
                         </div>
                       </div>
                       
-                      <div className="flex items-center gap-2">
-                        <div className="flex flex-wrap gap-1.5 items-center">
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {/* Compact single pill for reduced width screens */}
+                        <div className="flex md:hidden items-center">
+                          {activePatient.anamnesis.hta || activePatient.anamnesis.diabetes || activePatient.anamnesis.tabaquismo > 0 ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-extrabold bg-red-500/10 text-red-600 dark:text-red-400 rounded-full border border-red-500/20">
+                              <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
+                              {activePatient.anamnesis.hta && activePatient.anamnesis.diabetes ? "HTA + DBT" : activePatient.anamnesis.hta ? "HTA" : activePatient.anamnesis.diabetes ? "DBT" : "Tabaquismo"}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-extrabold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-full border border-emerald-500/20">
+                              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+                              Sano
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Full Pills for Desktop view */}
+                        <div className="hidden md:flex items-center gap-1.5 flex-nowrap">
                           {/* HTA Alert */}
                           {activePatient.anamnesis.hta && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-[10px] font-extrabold bg-red-500/10 text-red-600 dark:text-red-400 rounded-full border border-red-500/20 shadow-xs animate-pulse">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-extrabold bg-red-500/10 text-red-600 dark:text-red-400 rounded-full border border-red-500/20 shadow-xs animate-pulse whitespace-nowrap">
                               <span className="w-1.5 h-1.5 bg-red-500 rounded-full" />
                               HTA Activa
                             </span>
@@ -1152,26 +1444,26 @@ export default function App() {
 
                           {/* Diabetes Alert */}
                           {activePatient.anamnesis.diabetes ? (
-                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 text-[10px] font-extrabold rounded-full border shadow-xs ${
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-extrabold rounded-full border shadow-xs whitespace-nowrap ${
                               activePatient.anamnesis.diabetesStatus === 'severe'
                                 ? "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20 animate-pulse"
                                 : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
                             }`}>
                               <span className={`w-1.5 h-1.5 rounded-full ${activePatient.anamnesis.diabetesStatus === 'severe' ? 'bg-rose-500' : 'bg-amber-500'}`} />
-                              Diabetes {activePatient.anamnesis.diabetesStatus === 'severe' ? 'Descompensada' : 'Controlada'}
+                              DBT {activePatient.anamnesis.diabetesStatus === 'severe' ? 'Severa' : 'Controlada'}
                             </span>
                           ) : null}
 
                           {/* Smoking Alert */}
                           {activePatient.anamnesis.tabaquismo > 0 ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-[10px] font-extrabold bg-slate-500/10 text-slate-600 dark:text-slate-300 rounded-full border border-slate-500/20">
-                              🚬 {activePatient.anamnesis.tabaquismo} cig./día
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-extrabold bg-slate-500/10 text-slate-600 dark:text-slate-300 rounded-full border border-slate-500/20 whitespace-nowrap">
+                              🚬 {activePatient.anamnesis.tabaquismo} cig./d
                             </span>
                           ) : null}
 
                           {/* Safe State indicator fallback */}
                           {!activePatient.anamnesis.hta && !activePatient.anamnesis.diabetes && activePatient.anamnesis.tabaquismo === 0 && !activePatient.anamnesis.alergias && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-[10px] font-extrabold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-full border border-emerald-500/20 shadow-xs">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-extrabold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-full border border-emerald-500/20 shadow-xs whitespace-nowrap">
                               <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
                               Sistémicamente Sano
                             </span>
@@ -1180,16 +1472,16 @@ export default function App() {
 
                         <button
                           onClick={() => setIsAlertsCollapsed(!isAlertsCollapsed)}
-                          className="p-1.5 hover:bg-slate-200/60 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-xl transition-all cursor-pointer"
-                          title={isAlertsCollapsed ? "Expandir detalles de alertas" : "Plegar radar de alertas"}
+                          className="p-1 hover:bg-slate-200/60 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg transition-all cursor-pointer"
+                          title={isAlertsCollapsed ? "Expandir radar de alertas" : "Plegar radar de alertas"}
                         >
-                          <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isAlertsCollapsed ? "rotate-180" : ""}`} />
+                          <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isAlertsCollapsed ? "rotate-180" : ""}`} />
                         </button>
                       </div>
                     </div>
 
                     {!isAlertsCollapsed && (
-                      <div className="mt-3 pt-3 border-t border-slate-200/60 dark:border-slate-800/60 grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+                      <div className="mt-2.5 pt-2.5 border-t border-slate-200/60 dark:border-slate-800/60 grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
                         <div className="bg-white/60 dark:bg-slate-950/40 p-2.5 rounded-xl border border-slate-200/50 dark:border-slate-800/50">
                           <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Alergias Conocidas</span>
                           <p className="font-bold text-slate-700 dark:text-slate-200 mt-0.5">
@@ -1240,7 +1532,7 @@ export default function App() {
                               id: "periodoncia",
                               label: "Examen Dental y Periodontal",
                               icon: Activity,
-                              items: ["odontograma", "periodontograma", "pra", "oleary"]
+                              items: ["odontograma", "periodontograma", "psr", "pra", "oleary"]
                             },
                             {
                               id: "gestion",
@@ -1328,7 +1620,7 @@ export default function App() {
                             onClick={() => {
                               const nextZen = !isZenMode;
                               setIsZenMode(nextZen);
-                              localStorage.setItem("perioZenMode", String(nextZen));
+                              safeStorage.setItem("perioZenMode", String(nextZen));
                               if (nextZen) {
                                 setIsSidebarCollapsed(true);
                                 setIsClinicalSidebarCollapsed(true);
@@ -1350,50 +1642,91 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Station Pills Row */}
-                      <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar px-1 py-0.5 scroll-smooth relative">
-                        {[
-                          { id: "ficha", label: "Ficha & Anamnesis", icon: User, badge: "Ficha", cat: "evaluacion" },
-                          { id: "especialidad", label: "Consola Especialidades", icon: Stethoscope, badge: "Espec", cat: "evaluacion" },
-                          { id: "xrays", label: "Tomografías & Rx", icon: HeartPulse, badge: "Rx", cat: "evaluacion" },
-                          { id: "odontograma", label: "Odontograma", icon: Smile, badge: "Dental", cat: "periodoncia" },
-                          { id: "periodontograma", label: "Periodontograma", icon: Activity, badge: "Encías", cat: "periodoncia" },
-                          { id: "pra", label: "Riesgo PRA", icon: TrendingUp, badge: "PRA", cat: "periodoncia" },
-                          { id: "oleary", label: "Índice O'Leary", icon: ClipboardList, badge: "Placa", cat: "periodoncia" },
-                          { id: "soap", label: "Redactor SOAP (AI)", icon: Sparkles, badge: "AI Copilot", cat: "gestion" },
-                          { id: "presupuesto", label: "Presupuestos & Planes", icon: Banknote, badge: "Planes", cat: "gestion" }
-                        ].map(st => {
-                          const IconComponent = st.icon;
-                          const isStationActive = clinicalSubView === st.id;
-                          return (
-                            <button
-                              key={st.id}
-                              onClick={() => setClinicalSubView(st.id as any)}
-                              className={`relative px-3 py-1.5 rounded-xl text-xs font-bold tracking-wide transition-colors duration-150 flex items-center gap-2 whitespace-nowrap cursor-pointer border shrink-0 ${
-                                isStationActive
-                                  ? "border-teal-600 text-white shadow-xs scale-[1.01]"
-                                  : "bg-white dark:bg-slate-900 border-slate-200/70 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60"
-                              }`}
-                            >
-                              {isStationActive && (
-                                <motion.div
-                                  layoutId="stationActivePillBg"
-                                  className="absolute inset-0 bg-teal-600 rounded-xl z-0"
-                                  transition={{ type: "spring", stiffness: 450, damping: 32 }}
-                                />
-                              )}
-                              <IconComponent className={`w-3.5 h-3.5 relative z-10 ${isStationActive ? 'text-white' : 'text-teal-600 dark:text-teal-400'}`} />
-                              <span className="relative z-10">{st.label}</span>
-                              <span className={`relative z-10 text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
-                                isStationActive 
-                                  ? 'bg-white/20 text-white' 
-                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500'
-                              }`}>
-                                {st.badge}
-                              </span>
-                            </button>
-                          );
-                        })}
+                      {/* Station Pills Row with Left & Right Navigation Arrows */}
+                      <div className="relative flex items-center gap-1.5 w-full">
+                        {/* Botón Flecha Izquierda */}
+                        <button
+                          type="button"
+                          onClick={() => scrollClinicalNav("left")}
+                          disabled={!canScrollNavLeft}
+                          className={`shrink-0 p-1.5 rounded-xl border transition-all cursor-pointer flex items-center justify-center shadow-xs z-10 ${
+                            canScrollNavLeft
+                              ? "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-teal-950/60 hover:text-teal-600 dark:hover:text-teal-400 hover:border-teal-500/40 active:scale-90"
+                              : "bg-slate-50/80 dark:bg-slate-900/40 border-slate-200/50 dark:border-slate-800/50 text-slate-300 dark:text-slate-600 opacity-40 cursor-not-allowed"
+                          }`}
+                          title="Desplazar estaciones a la izquierda"
+                          aria-label="Desplazar estaciones hacia la izquierda"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Contenedor de Estaciones */}
+                        <div
+                          ref={clinicalNavRef}
+                          onScroll={checkNavScroll}
+                          className="flex-1 flex items-center gap-1.5 overflow-x-auto hide-scrollbar px-1 py-0.5 scroll-smooth relative"
+                        >
+                          {[
+                            { id: "ficha", label: "Ficha & Anamnesis", icon: User, badge: "Ficha", cat: "evaluacion" },
+                            { id: "especialidad", label: "Consola Especialidades", icon: Stethoscope, badge: "Espec", cat: "evaluacion" },
+                            { id: "xrays", label: "Tomografías & Rx", icon: HeartPulse, badge: "Rx", cat: "evaluacion" },
+                            { id: "odontograma", label: "Odontograma", icon: Smile, badge: "Dental", cat: "periodoncia" },
+                            { id: "periodontograma", label: "Periodontograma", icon: Activity, badge: "Encías", cat: "periodoncia" },
+                            { id: "psr", label: "Sondaje PSR (OMS)", icon: Stethoscope, badge: "Tamizaje", cat: "periodoncia" },
+                            { id: "pra", label: "Riesgo PRA", icon: TrendingUp, badge: "PRA", cat: "periodoncia" },
+                            { id: "oleary", label: "Índice O'Leary", icon: ClipboardList, badge: "Placa", cat: "periodoncia" },
+                            { id: "soap", label: "Redactor SOAP (AI)", icon: Sparkles, badge: "AI Copilot", cat: "gestion" },
+                            { id: "presupuesto", label: "Presupuestos & Planes", icon: Banknote, badge: "Planes", cat: "gestion" }
+                          ].map(st => {
+                            const IconComponent = st.icon;
+                            const isStationActive = clinicalSubView === st.id;
+                            return (
+                              <button
+                                key={st.id}
+                                data-active-station={isStationActive}
+                                onClick={() => setClinicalSubView(st.id as any)}
+                                className={`relative px-3 py-1.5 rounded-xl text-xs font-bold tracking-wide transition-colors duration-150 flex items-center gap-2 whitespace-nowrap cursor-pointer border shrink-0 ${
+                                  isStationActive
+                                    ? "border-teal-600 text-white shadow-xs scale-[1.01]"
+                                    : "bg-white dark:bg-slate-900 border-slate-200/70 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60"
+                                }`}
+                              >
+                                {isStationActive && (
+                                  <motion.div
+                                    layoutId="stationActivePillBg"
+                                    className="absolute inset-0 bg-teal-600 rounded-xl z-0"
+                                    transition={{ type: "spring", stiffness: 450, damping: 32 }}
+                                  />
+                                )}
+                                <IconComponent className={`w-3.5 h-3.5 relative z-10 ${isStationActive ? 'text-white' : 'text-teal-600 dark:text-teal-400'}`} />
+                                <span className="relative z-10">{st.label}</span>
+                                <span className={`relative z-10 text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
+                                  isStationActive 
+                                    ? 'bg-white/20 text-white' 
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500'
+                                }`}>
+                                  {st.badge}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Botón Flecha Derecha */}
+                        <button
+                          type="button"
+                          onClick={() => scrollClinicalNav("right")}
+                          disabled={!canScrollNavRight}
+                          className={`shrink-0 p-1.5 rounded-xl border transition-all cursor-pointer flex items-center justify-center shadow-xs z-10 ${
+                            canScrollNavRight
+                              ? "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-teal-950/60 hover:text-teal-600 dark:hover:text-teal-400 hover:border-teal-500/40 active:scale-90"
+                              : "bg-slate-50/80 dark:bg-slate-900/40 border-slate-200/50 dark:border-slate-800/50 text-slate-300 dark:text-slate-600 opacity-40 cursor-not-allowed"
+                          }`}
+                          title="Desplazar estaciones a la derecha"
+                          aria-label="Desplazar estaciones hacia la derecha"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                   )}
@@ -1437,6 +1770,16 @@ export default function App() {
                               onUpdatePatient={(updatedPat) => {
                                 setPatients(prev => prev.map(p => p.id === updatedPat.id ? updatedPat : p));
                               }}
+                              onOpenChairMode={() => setShowChairMode(true)}
+                              onNavigateToPsr={() => setClinicalSubView("psr")}
+                            />
+                          ) : clinicalSubView === "psr" ? (
+                            <PSRControl
+                              patient={activePatient}
+                              onUpdate={(newPsr) => {
+                                setPatients(prev => prev.map(p => p.id === activePatient.id ? { ...p, psr: newPsr } : p));
+                              }}
+                              onNavigateToFullPerio={() => setClinicalSubView("periodontograma")}
                             />
                           ) : clinicalSubView === "pra" ? (
                             <PRARiskAssessment 
@@ -1473,6 +1816,7 @@ export default function App() {
                             <TreatmentPlanModule 
                               patient={activePatient}
                               aranceles={aranceles}
+                              doctorName={doctorName}
                               onUpdatePatient={(updatedPat) => {
                                 setPatients(prev => prev.map(p => p.id === updatedPat.id ? updatedPat : p));
                               }}
@@ -1484,82 +1828,20 @@ export default function App() {
                   </div>
                 </div>
               ) : (
-              <div className="bg-slate-50/50 dark:bg-slate-900/40 p-8 rounded-3xl border border-slate-205 dark:border-slate-800 text-center space-y-6 shadow-sm">
-                <div className="max-w-md mx-auto space-y-2">
-                  <div className="w-14 h-14 bg-teal-500/10 text-teal-600 dark:text-teal-400 rounded-2xl flex items-center justify-center border border-teal-500/20 mx-auto">
-                    <ClipboardList className="w-6 h-6" />
-                  </div>
-                  <h3 className="text-base font-display font-black text-slate-800 dark:text-white">Estación de Diagnóstico Clínico</h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                    Por favor, selecciona un expediente médico para habilitar el Odontograma anatómico y el Periodontograma paramétrico:
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-w-4xl mx-auto text-left">
-                  {patients.map((p) => {
-                    const pockets = Object.values(p.periodontogram || {}).reduce((acc, currentTooth: any) => {
-                      let pcts = 0;
-                      if (currentTooth) {
-                        const pts = ["pv1", "pv2", "pv3", "pl1", "pl2", "pl3"];
-                        pts.forEach(pt => {
-                          if (currentTooth[pt] >= 4) pcts++;
-                        });
-                      }
-                      return acc + pcts;
-                    }, 0);
-
-                    return (
-                      <button
-                        key={p.id}
-                        onClick={() => {
-                          setActivePatientId(p.id);
-                          setClinicalSubView("especialidad");
-                        }}
-                        className="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/80 rounded-2xl hover:border-teal-500/50 hover:shadow-md transition-all cursor-pointer text-left group flex flex-col justify-between h-40"
-                      >
-                        <div className="space-y-1 w-full">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[10px] font-mono font-black text-slate-400 dark:text-slate-500">
-                              EXP: {p.id.split('-')[1] || p.id}
-                            </span>
-                            <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-teal-500/5 text-teal-600 dark:text-teal-400 font-bold">
-                              Activo
-                            </span>
-                          </div>
-                          <h4 className="text-sm font-bold text-slate-900 dark:text-white truncate group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors">
-                            {p.name}
-                          </h4>
-                          <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
-                            {p.rut ? <span className="font-mono text-teal-600 dark:text-teal-400 font-bold mr-1">RUT: {p.rut} •</span> : null}🎂 {p.birthdate}  |  📞 {p.phone}
-                          </p>
-                        </div>
-
-                        <div className="border-t border-slate-100 dark:border-slate-800/60 pt-3 w-full flex items-center justify-between text-[10px]">
-                          <span className="font-semibold text-slate-400 dark:text-slate-400">
-                            Bolsas &ge; 4mm: <strong className="text-indigo-600 dark:text-indigo-400 font-bold">{pockets}</strong>
-                          </span>
-                          <span className="text-teal-600 dark:text-teal-400 font-black uppercase tracking-wider inline-flex items-center gap-1">
-                            Abrir Consola &rarr;
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="pt-4 border-t border-slate-200/40 dark:border-slate-800/40 max-w-sm mx-auto">
-                  <button
-                    onClick={() => {
-                      setActiveTab("pacientes");
-                      setShowRegisterForm(true);
-                    }}
-                    className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <Plus className="w-4 h-4" /> Registrar Nuevo Expediente
-                  </button>
-                </div>
-              </div>
-            )}
+                <ClinicalPatientSelector
+                  patients={patients}
+                  onSelectPatient={(id, subView) => {
+                    setActivePatientId(id);
+                    if (subView) {
+                      setClinicalSubView(subView);
+                    }
+                  }}
+                  onRegisterNew={() => {
+                    setActiveTab("pacientes");
+                    setShowRegisterForm(true);
+                  }}
+                />
+              )}
           </div>
         );
   };
@@ -1657,7 +1939,14 @@ export default function App() {
       case "finanzas":
         return (
           <div className="animate-fade-in z-10 relative">
-            <FinanceModule activePatient={activePatient} setPatients={setPatients} aranceles={aranceles} />
+            <FinanceModule 
+              activePatient={activePatient} 
+              setPatients={setPatients} 
+              aranceles={aranceles}
+              patients={patients}
+              doctorName={doctorName}
+              onSelectPatient={(id) => setActivePatientId(id)}
+            />
           </div>
         );
 
@@ -1767,6 +2056,9 @@ export default function App() {
                   }}
                   onOpenPayments={() => {
                     setActiveTab("finanzas");
+                  }}
+                  onOpenGmail={() => {
+                    setShowGmailModal(true);
                   }}
                 />
               </Suspense>
@@ -2255,7 +2547,7 @@ export default function App() {
           onClick={() => {
             if (isZenMode) {
               setIsZenMode(false);
-              localStorage.setItem("perioZenMode", "false");
+              safeStorage.setItem("perioZenMode", "false");
               setIsSidebarCollapsed(false);
               setIsClinicalSidebarCollapsed(false);
             } else {
@@ -2341,6 +2633,7 @@ export default function App() {
               items: [
                 { id: "dashboard", label: "Panel Principal", icon: LayoutDashboard },
                 { id: "finanzas", label: "Plan & Finanzas", icon: Banknote },
+                { id: "dentito-finance", label: "Dentito Finance", icon: Zap, isExternal: true, url: DENTITO_APP_URL },
                 { id: "reportes", label: "Imp / Reportes", icon: Printer },
               ]
             },
@@ -2369,6 +2662,33 @@ export default function App() {
                 const ActiveIcon = item.icon;
                 const isActive = activeTab === item.id;
                 const isNeon = item.id === "dentalstories" || item.id === "tienda" || item.id === "bolsa-empleo";
+                const isExternal = (item as any).isExternal;
+
+                if (isExternal) {
+                  return (
+                    <a
+                      key={item.id}
+                      href={(item as any).url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={effectiveSidebarCollapsed ? item.label : "Abrir Dentito Finance en una nueva pestaña"}
+                      className={`relative w-full text-left font-bold text-xs py-2.5 rounded-xl transition-all cursor-pointer inline-flex items-center gap-3 ${
+                        effectiveSidebarCollapsed ? 'justify-center px-1' : 'px-3.5'
+                      } text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 dark:hover:bg-amber-500/15 border border-amber-500/25 hover:border-amber-500/45 shadow-xs group`}
+                    >
+                      <div className="w-5 h-5 rounded-md bg-amber-500/15 text-amber-500 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                        <Zap className="w-3.5 h-3.5 text-amber-500" />
+                      </div>
+                      {!effectiveSidebarCollapsed && (
+                        <div className="flex items-center justify-between flex-1 min-w-0">
+                          <span className="truncate">{item.label}</span>
+                          <ExternalLink className="w-3.5 h-3.5 text-slate-400 group-hover:text-amber-500 shrink-0 ml-1.5 transition-colors" />
+                        </div>
+                      )}
+                    </a>
+                  );
+                }
+
                 return (
                   <button
                     key={item.id}
@@ -2473,37 +2793,69 @@ export default function App() {
         />
 
         {/* MOBILE CONTAINER HEADER */}
-        <header className="md:hidden w-full bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 p-3.5 flex justify-between items-center z-20 sticky top-0 shadow-xs no-print">
-          <div className="flex items-center gap-2 cursor-pointer" onClick={() => setIsMobileDrawerOpen(true)}>
-            <Logo size="sm" subtitle="Software Odontológico" />
+        <header className="md:hidden w-full bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 p-2.5 sm:p-3.5 flex justify-between items-center z-20 sticky top-0 shadow-xs no-print gap-2">
+          <div className="flex items-center gap-2 cursor-pointer shrink-0" onClick={() => setIsMobileDrawerOpen(true)}>
+            <Logo size="sm" showSubtitle={false} />
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0" id="cajon-de-aplicaciones-mobile-container">
             {activePatient && (
               <button
+                type="button"
                 onClick={() => { setActiveTab('clinica'); setClinicalSubView('ficha'); }}
-                className="flex items-center gap-1.5 px-2.5 py-1 bg-teal-50 dark:bg-teal-950/60 border border-teal-500/30 rounded-full text-teal-700 dark:text-teal-300 text-[10px] font-bold cursor-pointer"
+                className="flex items-center gap-1 px-2 py-1 bg-teal-50 dark:bg-teal-950/60 border border-teal-500/30 rounded-full text-teal-700 dark:text-teal-300 text-[10px] font-bold cursor-pointer max-w-[90px] min-h-[36px]"
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="truncate max-w-[80px]">{activePatient.name.split(' ')[0]}</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                <span className="truncate">{activePatient.name.split(' ')[0]}</span>
               </button>
             )}
 
-            <button 
-              onClick={() => window.dispatchEvent(new CustomEvent("periodash-open-search"))}
-              className="text-teal-600 dark:text-teal-400 p-2 border border-slate-200/60 dark:border-slate-800 rounded-xl cursor-pointer bg-slate-50 dark:bg-slate-800/60 hover:bg-teal-50 dark:hover:bg-teal-950/20"
-              title="Buscador rápido (Ctrl+K)"
+            {/* Acceso Rápido al Modo Sillón */}
+            <button
+              type="button"
+              onClick={() => setShowChairMode(true)}
+              className="text-white bg-gradient-to-r from-teal-600 to-emerald-600 p-2 rounded-xl cursor-pointer shadow-xs active:scale-95 flex items-center justify-center shrink-0 min-h-[38px] min-w-[38px] touch-manipulation"
+              title="Activar Modo Sillón: Botones XL, Voz y Cámara (Alt+S)"
             >
-              <Search className="w-4 h-4" />
+              <Stethoscope className="w-4 h-4" />
             </button>
 
-            <button 
-              onClick={() => setDarkMode(!darkMode)}
-              className="text-slate-500 dark:text-slate-300 p-2 border border-slate-200/60 dark:border-slate-800 rounded-xl cursor-pointer bg-slate-50 dark:bg-slate-800/60"
-              title="Cambiar tema"
-            >
-              {darkMode ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4 text-indigo-400" />}
-            </button>
+            {/* Control por Voz Manos Libres Móvil */}
+            <VoiceHeaderControl
+              handsFreeActive={handsFreeVoiceActive}
+              onToggleHandsFree={() => {
+                setHandsFreeVoiceActive(prev => {
+                  const next = !prev;
+                  safeStorage.setItem("perioHandsFreeVoice", String(next));
+                  return next;
+                });
+              }}
+              onOpenHelp={() => window.dispatchEvent(new CustomEvent("periodash-open-voice-help"))}
+            />
+
+            {/* Botón Cajón de Aplicaciones Móvil */}
+            <div id="cajon-de-aplicaciones-mobile-container" className="shrink-0">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowAppLauncher(prev => !prev);
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-95 group shrink-0 min-h-[38px] touch-manipulation ${
+                  showAppLauncher
+                    ? "bg-teal-600 border-teal-600 text-white shadow-teal-500/20"
+                    : "bg-white/90 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border-slate-200/80 dark:border-slate-700"
+                }`}
+                title="Cajón de Aplicaciones: Herramientas, alertas, voz, buscador y módulos"
+                aria-label="Cajón de aplicaciones"
+              >
+                <LayoutGrid className={`w-4 h-4 transition-transform group-hover:scale-110 ${showAppLauncher ? "text-white" : "text-teal-600 dark:text-teal-400"}`} />
+                <span className="text-[11px] font-bold tracking-tight hidden xs:inline">Apps</span>
+                {handsFreeVoiceActive && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                )}
+              </button>
+            </div>
           </div>
         </header>
 
@@ -2532,10 +2884,10 @@ export default function App() {
               </>
             )}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             {/* Live Real-Time Date Pill */}
             <div 
-              className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50/70 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-800 text-[11px] font-semibold text-slate-700 dark:text-slate-200 shadow-2xs"
+              className="hidden 2xl:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50/70 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-800 text-[11px] font-semibold text-slate-700 dark:text-slate-200 shadow-2xs"
               title="Fecha actual del sistema clínico"
             >
               <Calendar className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
@@ -2556,42 +2908,76 @@ export default function App() {
               }}
             />
 
-            {/* Quick Search */}
-            <button 
-              onClick={() => window.dispatchEvent(new CustomEvent("periodash-open-search"))}
-              className="flex items-center gap-2 px-3.5 py-1.5 bg-slate-50/50 hover:bg-slate-100/80 dark:bg-slate-800/40 dark:hover:bg-slate-800/80 border border-slate-100 dark:border-slate-800/50 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 rounded-xl transition-all cursor-pointer"
-              title="Buscador rápido"
-            >
-              <Search className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-              <span className="text-[11px] font-medium">Buscador</span>
-              <kbd className="text-[9px] bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-500 rounded px-1 py-0.5 tracking-tight font-mono font-bold ml-1.5">
-                Ctrl+K
-              </kbd>
-            </button>
+            {/* Control por Voz Manos Libres Desktop */}
+            <VoiceHeaderControl
+              handsFreeActive={handsFreeVoiceActive}
+              onToggleHandsFree={() => {
+                setHandsFreeVoiceActive(prev => {
+                  const next = !prev;
+                  safeStorage.setItem("perioHandsFreeVoice", String(next));
+                  return next;
+                });
+              }}
+              onOpenHelp={() => window.dispatchEvent(new CustomEvent("periodash-open-voice-help"))}
+            />
 
-            {/* Centro de Éxito button */}
-            <button 
-              onClick={() => setShowHelpPanel(true)}
-              className="flex items-center gap-2 px-3.5 py-1.5 bg-gradient-to-r from-teal-500/10 to-emerald-500/10 hover:from-teal-500/20 hover:to-emerald-500/20 border border-teal-500/20 text-teal-700 dark:text-teal-300 rounded-xl transition-all cursor-pointer group"
-              title="Centro de Éxito Clínico"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-teal-500 group-hover:animate-bounce" />
-              <span className="text-[11px] font-bold">Guía Clínica</span>
-              {learningMode && (
-                <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-ping" />
-              )}
-            </button>
-
-            {/* Theme Toggle */}
-            <button 
-              onClick={() => setDarkMode(!darkMode)}
-              className="p-2 border border-slate-100 dark:border-slate-800/50 rounded-xl cursor-pointer bg-slate-50/30 dark:bg-slate-800/30 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-500 dark:text-slate-300 transition-all"
-              title="Cambiar apariencia"
-            >
-              {darkMode ? <Sun className="w-3.5 h-3.5 text-amber-500" /> : <Moon className="w-3.5 h-3.5 text-indigo-700" />}
-            </button>
+            {/* CAJÓN DE APLICACIONES CLÍNICO (Botón único que al pincharlo se abre) */}
+            <div className="relative" ref={appLauncherRef} id="cajon-de-aplicaciones-container">
+              <button
+                type="button"
+                onClick={() => setShowAppLauncher(prev => !prev)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-95 group ${
+                  showAppLauncher
+                    ? "bg-teal-600 border-teal-600 text-white shadow-teal-500/20"
+                    : "bg-white/90 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border-slate-200/80 dark:border-slate-700 hover:border-teal-500/40"
+                }`}
+                title="Cajón de Aplicaciones: Modo sillón, buscador, alertas, Gmail, voz y herramientas clínicas"
+                aria-label="Cajón de aplicaciones"
+              >
+                <LayoutGrid className={`w-4 h-4 transition-transform group-hover:scale-110 ${showAppLauncher ? "text-white" : "text-teal-600 dark:text-teal-400"}`} />
+                <span className="text-[11px] font-bold tracking-tight">Cajón de Apps</span>
+                {handsFreeVoiceActive && (
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" title="Voz manos libres activa" />
+                )}
+              </button>
+            </div>
           </div>
         </header>
+
+        {/* Ventana Desplegable del Cajón de Aplicaciones (Accessible in Mobile and Desktop) */}
+        <AppLauncherDrawer
+          isOpen={showAppLauncher}
+          onClose={() => setShowAppLauncher(false)}
+          onOpenChairMode={() => setShowChairMode(true)}
+          onOpenSearch={() => window.dispatchEvent(new CustomEvent("periodash-open-search"))}
+          onOpenGmail={() => setShowGmailModal(true)}
+          isGmailConnected={isGmailConnected()}
+          patients={patients}
+          onSelectPatient={(id) => {
+            setActivePatientId(id);
+            setActiveTab("clinica");
+            setClinicalSubView("ficha");
+          }}
+          onNavigateTab={(tab, subView) => {
+            setActiveTab(tab as ActiveTab);
+            if (subView) setClinicalSubView(subView as any);
+          }}
+          onOpenHelp={() => setShowHelpPanel(true)}
+          learningMode={learningMode}
+          onOpenTour={() => setShowInteractiveTour(true)}
+          speechSupported={speechSupported}
+          handsFreeVoiceActive={handsFreeVoiceActive}
+          onToggleHandsFreeVoice={() => {
+            setHandsFreeVoiceActive(prev => {
+              const next = !prev;
+              safeStorage.setItem("perioHandsFreeVoice", String(next));
+              return next;
+            });
+          }}
+          darkMode={darkMode}
+          onToggleDarkMode={() => setDarkMode(!darkMode)}
+          onOpenHipaa={() => setShowHipaaCenter(true)}
+        />
 
         {/* VIEWPORT AREA CONTENT */}
         <main className="flex-1 w-full p-4 md:p-8 space-y-6 pb-[calc(110px+env(safe-area-inset-bottom))] md:pb-8 relative z-0 print:p-0 print:m-0 print:overflow-visible">
@@ -2625,12 +3011,17 @@ export default function App() {
         doctorName={doctorName}
         clinicName={clinicName}
         aranceles={aranceles}
+        currentUser={activeUser}
       />
 
       <Spotlight 
         patients={patients} 
         onSelectPatient={(id) => setActivePatientId(id)} 
         onNavigate={(tab) => {
+          if (tab === "sillon") {
+            setShowChairMode(true);
+            return;
+          }
           setActiveTab(tab as ActiveTab);
           window.dispatchEvent(new CustomEvent('periodash-navigate', { detail: tab }));
         }} 
@@ -2718,6 +3109,17 @@ export default function App() {
             />
           )}
 
+          {showGmailModal && (
+            <GmailCenterModal
+              isOpen={showGmailModal}
+              onClose={() => setShowGmailModal(false)}
+              darkMode={darkMode}
+              patients={patients}
+              currentUser={activeUser}
+              initialPatient={activePatient}
+            />
+          )}
+
           {deletingPatientId && (
             <motion.div
               initial={{ opacity: 0 }}
@@ -2788,6 +3190,7 @@ export default function App() {
         onOpenNewAppointment={() => setActiveTab('agenda')}
         onOpenNewPatient={() => setShowRegisterForm(true)}
         onOpenMenu={() => setIsMobileDrawerOpen(true)}
+        handsFreeVoiceActive={handsFreeVoiceActive}
       />
 
       {/* Mobile Full Navigation Drawer */}
@@ -2816,6 +3219,16 @@ export default function App() {
         onOpenNewPatient={() => setShowRegisterForm(true)}
         onOpenNewAppointment={() => setActiveTab('agenda')}
         onOpenLanding={() => setShowLandingModal(true)}
+        onOpenChairMode={() => setShowChairMode(true)}
+        handsFreeVoiceActive={handsFreeVoiceActive}
+        onToggleHandsFreeVoice={() => {
+          setHandsFreeVoiceActive(prev => {
+            const next = !prev;
+            safeStorage.setItem("perioHandsFreeVoice", String(next));
+            return next;
+          });
+        }}
+        onOpenVoiceHelp={() => window.dispatchEvent(new CustomEvent("periodash-open-voice-help"))}
         onLogout={handleLogout}
       />
 
@@ -2884,6 +3297,91 @@ export default function App() {
         isOpenControlled={showSecurityModal}
         onCloseControlled={() => setShowSecurityModal(false)}
       />
+
+      {/* Patient Presentation Mode Modal */}
+      {showPatientPresentation && activePatient && (
+        <Suspense fallback={null}>
+          <PatientPresentationMode
+            patient={activePatient}
+            onClose={() => setShowPatientPresentation(false)}
+            clinicName={clinicName}
+            doctorName={doctorName}
+          />
+        </Suspense>
+      )}
+
+      {/* Interactive Onboarding Tour Modal */}
+      {showInteractiveTour && (
+        <Suspense fallback={null}>
+          <InteractiveTourModal
+            isOpen={showInteractiveTour}
+            onClose={() => setShowInteractiveTour(false)}
+            onNavigateToTab={(tab, subView) => {
+              setActiveTab(tab as any);
+              if (subView) setClinicalSubView(subView as any);
+            }}
+          />
+        </Suspense>
+      )}
+
+      {/* Sistema Inteligente de Control por Voz Manos Libres de PerioDash */}
+      <VoiceCommandAssistant
+        handsFreeActive={handsFreeVoiceActive}
+        onToggleHandsFree={(active) => {
+          setHandsFreeVoiceActive(active);
+          safeStorage.setItem("perioHandsFreeVoice", String(active));
+        }}
+        isChairModeOpen={showChairMode}
+        patients={patients}
+        activePatientId={activePatientId}
+        onSelectPatient={(patientId) => {
+          setActivePatientId(patientId);
+          setActiveTab("clinica");
+          setClinicalSubView("ficha");
+        }}
+        onClearPatient={() => {
+          setActivePatientId("");
+        }}
+        activeTab={activeTab}
+        onNavigateTab={(tab, subView) => {
+          setActiveTab(tab);
+          if (subView) setClinicalSubView(subView as any);
+        }}
+        darkMode={darkMode}
+        onSetDarkMode={(isDark) => setDarkMode(isDark)}
+        onToggleDarkMode={() => setDarkMode(!darkMode)}
+        isZenMode={isZenMode}
+        onSetZenMode={(isZen) => {
+          setIsZenMode(isZen);
+          safeStorage.setItem("perioZenMode", String(isZen));
+        }}
+        onSetChairMode={(open) => setShowChairMode(open)}
+        onOpenNewPatient={() => {
+          setActiveTab("pacientes");
+          setShowRegisterForm(true);
+        }}
+        onOpenSearch={() => window.dispatchEvent(new CustomEvent("periodash-open-search"))}
+        onOpenAppLauncher={() => setShowAppLauncher(true)}
+        onCloseAppLauncher={() => setShowAppLauncher(false)}
+        onOpenHipaa={() => setShowHipaaCenter(true)}
+        onTogglePrivacy={() => handleTogglePrivacyMode()}
+        playChime={playVoiceWakeChime}
+      />
+
+      {/* Modo Sillón Clínico (Chairside Clinical Mode: Botones XL, Dictado por Voz y Cámara) */}
+      {showChairMode && (
+        <Suspense fallback={null}>
+          <ChairModeModal
+            isOpen={showChairMode}
+            onClose={() => setShowChairMode(false)}
+            patient={activePatient || patients[0]}
+            onUpdatePatient={(updatedPat) => {
+              setPatients(prev => prev.map(p => p.id === updatedPat.id ? updatedPat : p));
+            }}
+            darkMode={darkMode}
+          />
+        </Suspense>
+      )}
 
     </div>
   );

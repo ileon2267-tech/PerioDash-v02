@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { safeStorage } from '../utils/safeStorage';
 import { 
   Briefcase, 
   Star, 
@@ -210,14 +211,14 @@ export default function DirectorioEmpleos() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
   const [professionals, setProfessionals] = useState<ProfessionalProfile[]>(() => {
-    const saved = localStorage.getItem('periodash_job_professionals');
+    const saved = safeStorage.getItem('periodash_job_professionals');
     return saved ? JSON.parse(saved) : INITIAL_PROFESSIONALS;
   });
 
   const [selectedProfile, setSelectedProfile] = useState<ProfessionalProfile | null>(null);
   const [showMyProfile, setShowMyProfile] = useState(false);
   const [likedProfiles, setLikedProfiles] = useState<Record<string, boolean>>(() => {
-    const saved = localStorage.getItem('periodash_job_likes');
+    const saved = safeStorage.getItem('periodash_job_likes');
     return saved ? JSON.parse(saved) : {};
   });
 
@@ -225,7 +226,7 @@ export default function DirectorioEmpleos() {
   const [activeChatProf, setActiveChatProf] = useState<ProfessionalProfile | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [chatMessages, setChatMessages] = useState<Record<string, ChatMessage[]>>(() => {
-    const saved = localStorage.getItem('periodash_job_chats');
+    const saved = safeStorage.getItem('periodash_job_chats');
     if (saved) {
       return JSON.parse(saved);
     }
@@ -245,7 +246,7 @@ export default function DirectorioEmpleos() {
   // Invitation Modal State
   const [activeInviteProf, setActiveInviteProf] = useState<ProfessionalProfile | null>(null);
   const [invitations, setInvitations] = useState<ClinicalInvitation[]>(() => {
-    const saved = localStorage.getItem('periodash_job_invitations');
+    const saved = safeStorage.getItem('periodash_job_invitations');
     return saved ? JSON.parse(saved) : [
       {
         id: "inv-1",
@@ -273,7 +274,7 @@ export default function DirectorioEmpleos() {
 
   // Job Offers State
   const [jobOffers, setJobOffers] = useState<JobOffer[]>(() => {
-    const saved = localStorage.getItem('periodash_job_offers');
+    const saved = safeStorage.getItem('periodash_job_offers');
     return saved ? JSON.parse(saved) : INITIAL_JOB_OFFERS;
   });
   const [showNewJobModal, setShowNewJobModal] = useState(false);
@@ -290,9 +291,9 @@ export default function DirectorioEmpleos() {
   // Toast State
   const [toastMessage, setToastMessage] = useState<{ title: string; desc: string; type: 'success' | 'info' } | null>(null);
 
-  // My Profile State with local storage persistence
+  // My Profile State with safe storage persistence
   const [myProfileData, setMyProfileData] = useState(() => {
-    const saved = localStorage.getItem('periodash_my_profile');
+    const saved = safeStorage.getItem('periodash_my_profile');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -320,29 +321,29 @@ export default function DirectorioEmpleos() {
     };
   });
 
-  // Save changes to localStorage
+  // Save changes to safeStorage
   useEffect(() => {
-    localStorage.setItem('periodash_job_professionals', JSON.stringify(professionals));
+    safeStorage.setItem('periodash_job_professionals', JSON.stringify(professionals));
   }, [professionals]);
 
   useEffect(() => {
-    localStorage.setItem('periodash_my_profile', JSON.stringify(myProfileData));
+    safeStorage.setItem('periodash_my_profile', JSON.stringify(myProfileData));
   }, [myProfileData]);
 
   useEffect(() => {
-    localStorage.setItem('periodash_job_chats', JSON.stringify(chatMessages));
+    safeStorage.setItem('periodash_job_chats', JSON.stringify(chatMessages));
   }, [chatMessages]);
 
   useEffect(() => {
-    localStorage.setItem('periodash_job_invitations', JSON.stringify(invitations));
+    safeStorage.setItem('periodash_job_invitations', JSON.stringify(invitations));
   }, [invitations]);
 
   useEffect(() => {
-    localStorage.setItem('periodash_job_likes', JSON.stringify(likedProfiles));
+    safeStorage.setItem('periodash_job_likes', JSON.stringify(likedProfiles));
   }, [likedProfiles]);
 
   useEffect(() => {
-    localStorage.setItem('periodash_job_offers', JSON.stringify(jobOffers));
+    safeStorage.setItem('periodash_job_offers', JSON.stringify(jobOffers));
   }, [jobOffers]);
 
   // Handle Photo / Avatar Upload

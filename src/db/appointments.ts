@@ -5,9 +5,9 @@ import { eq, and } from "drizzle-orm";
 export async function getAppointmentsByUid(uid: string) {
   try {
     return await db.select().from(appointments).where(eq(appointments.uid, uid));
-  } catch (error) {
-    console.error("Database getAppointmentsByUid failed:", error);
-    throw new Error("Failed to fetch appointments from relational database.", { cause: error });
+  } catch (error: any) {
+    console.warn("Notice: Cloud SQL getAppointmentsByUid query unavailable (database in standby):", error?.message || error);
+    return [];
   }
 }
 

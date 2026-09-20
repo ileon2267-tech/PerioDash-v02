@@ -5,15 +5,18 @@ import {
   FileText, Plus, Trash2, Calculator, CheckCircle2, DollarSign, 
   AlertTriangle, Sparkles, Eye, ArrowRight, Activity, Smile, 
   Layers, Check, Sparkle, RefreshCw, HelpCircle, Info,
-  ShieldCheck, Camera, FileCheck, PenTool, Lock, ShieldAlert, X
+  ShieldCheck, Camera, FileCheck, PenTool, Lock, ShieldAlert, X,
+  Zap, CheckCircle, ExternalLink
 } from 'lucide-react';
 import { InformedConsentModal } from './InformedConsentModal';
 import { recordHipaaAudit } from '../utils/hipaaAudit';
+import { syncTreatmentToDentitoFinance, useDentitoSync, DENTITO_APP_URL } from '../services/dentitoFinanceSync';
 
 interface TreatmentPlanModuleProps {
   patient: Patient;
   aranceles: Record<string, number>;
   onUpdatePatient: (updated: Patient) => void;
+  doctorName?: string;
 }
 
 interface ClinicalDiagnosis {
@@ -34,7 +37,12 @@ interface ClinicalDiagnosis {
 const UPPER_TEETH_PRED = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
 const LOWER_TEETH_PRED = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
 
-export default function TreatmentPlanModule({ patient, aranceles, onUpdatePatient }: TreatmentPlanModuleProps) {
+export default function TreatmentPlanModule({ 
+  patient, 
+  aranceles, 
+  onUpdatePatient,
+  doctorName = "Dr. Ignacio León"
+}: TreatmentPlanModuleProps) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newDesc, setNewDesc] = useState('');
   const [newCost, setNewCost] = useState<number>(0);
@@ -45,6 +53,18 @@ export default function TreatmentPlanModule({ patient, aranceles, onUpdatePatien
   const [viewPredictive, setViewPredictive] = useState<'initial' | 'predicted'>('predicted');
   const [selectedProcForConsent, setSelectedProcForConsent] = useState<TreatmentProcedure | null>(null);
   const [blockedProcedureAlert, setBlockedProcedureAlert] = useState<TreatmentProcedure | null>(null);
+
+  // DentitoFinance Sync integration states & hook
+  const { sendToDentito, syncing: isSyncingBatch } = useDentitoSync();
+  const [syncingProcId, setSyncingProcId] = useState<string | null>(null);
+  const [dentitoToast, setDentitoToast] = useState<{
+    show: boolean;
+    title: string;
+    details: string;
+    treatment: string;
+    amount: number;
+    patientName: string;
+  } | null>(null);
 
   // Audit access to treatment plan
   useEffect(() => {
@@ -437,7 +457,95 @@ export default function TreatmentPlanModule({ patient, aranceles, onUpdatePatien
     });
   };
 
-  const handleToggleComplete = (id: string) => {
+  // Infers clinical diagnosis according to periodontal/dental status
+  const getInferredDiagnosis = () => {
+    if (clinicalDiagnoses && clinicalDiagnoses.length > 0) {
+      return clinicalDiagnoses[0].title;
+    }
+    if (patient.specialtyData?.perioStage) {
+      return `Periodontitis ${patient.specialtyData.perioStage}`;
+    }
+    return "Periodontitis Estadio III";
+  };
+
+  // Sync a single completed or selected treatment to DentitoFinance webhook
+  const executeDentitoSyncForProcedure = async (proc: TreatmentProcedure) => {
+    setSyncingProcId(proc.id);
+    const charged = Math.round(proc.cost * (1 - ((proc.discount || 0) / 100)));
+    const supplies = Math.round(proc.cost * 0.15); // Estimated supplies (curetas, anestesia, biomateriales)
+    const diagnosis = getInferredDiagnosis();
+    const teethTreated = proc.tooth 
+      ? `Pieza ${proc.tooth}${proc.surface ? ` (${proc.surface})` : ''}` 
+      : 'Sextante 5 (3.3 a 4.3)';
+
+    try {
+      const result = await syncTreatmentToDentitoFinance({
+        patientRut: patient.rut || patient.dni || "18.432.109-2",
+        patientName: patient.name,
+        diagnosis: diagnosis,
+        teethTreated: teethTreated,
+        treatmentName: proc.description,
+        durationMinutes: 60,
+        totalPrice: charged,
+        suppliesEstimate: supplies,
+        doctorName: doctorName || "Dra. Carolina Silva"
+      });
+
+      setDentitoToast({
+        show: true,
+        title: "Sincronizado con DentitoFinance",
+        details: "Tratamiento registrado exitosamente en el motor financiero",
+        treatment: proc.description,
+        amount: charged,
+        patientName: patient.name
+      });
+      setTimeout(() => setDentitoToast(null), 5000);
+      return result;
+    } catch (err) {
+      console.error("Error al sincronizar con DentitoFinance:", err);
+    } finally {
+      setSyncingProcId(null);
+    }
+  };
+
+  // Batch sync all completed or current treatments in plan using the useDentitoSync hook
+  const handleSyncEntirePlanToDentito = async () => {
+    const completedProcs = procedures.filter(p => p.completed);
+    const procsToSync = completedProcs.length > 0 ? completedProcs : procedures;
+    if (procsToSync.length === 0) return;
+
+    const totalPlanPrice = procsToSync.reduce((acc, p) => acc + Math.round(p.cost * (1 - ((p.discount || 0) / 100))), 0);
+    const teethList = procsToSync.map(p => p.tooth ? `P.${p.tooth}` : null).filter(Boolean).join(", ") || "Sextante 5 (3.3 a 4.3)";
+    const treatmentSummary = procsToSync.map(p => p.description).slice(0, 3).join(" + ") + (procsToSync.length > 3 ? ` (+${procsToSync.length - 3} más)` : '');
+
+    try {
+      await sendToDentito({
+        patientRut: patient.rut || patient.dni || "18.432.109-2",
+        patientName: patient.name,
+        diagnosis: getInferredDiagnosis(),
+        teeth: teethList,
+        treatment: treatmentSummary,
+        durationMinutes: 60,
+        chargedPrice: totalPlanPrice,
+        suppliesCost: Math.round(totalPlanPrice * 0.15),
+        specialistName: doctorName || "Dra. Carolina Silva"
+      });
+
+      setDentitoToast({
+        show: true,
+        title: "Plan Sincronizado con DentitoFinance",
+        details: `${procsToSync.length} prestaciones enviadas al motor financiero`,
+        treatment: treatmentSummary,
+        amount: totalPlanPrice,
+        patientName: patient.name
+      });
+      setTimeout(() => setDentitoToast(null), 5000);
+    } catch (err) {
+      console.error("Error syncing batch to DentitoFinance:", err);
+    }
+  };
+
+  const handleToggleComplete = async (id: string) => {
     const targetProc = procedures.find(p => p.id === id);
     if (targetProc && !targetProc.completed) {
       if (!targetProc.informedConsent?.accepted) {
@@ -445,16 +553,22 @@ export default function TreatmentPlanModule({ patient, aranceles, onUpdatePatien
         return;
       }
     }
-    const updated = procedures.map(p => p.id === id ? { ...p, completed: !p.completed } : p);
+    const isBecomingCompleted = targetProc ? !targetProc.completed : false;
+    const updated = procedures.map(p => p.id === id ? { ...p, completed: isBecomingCompleted } : p);
     onUpdatePatient({ ...patient, treatmentPlan: { ...tp, procedures: updated } });
 
     if (targetProc) {
-      recordHipaaAudit("UPDATE_TREATMENT_PLAN", `Cambio de estado en procedimiento: "${targetProc.description}" a ${!targetProc.completed ? 'COMPLETADO' : 'PENDIENTE'} para ${patient.name}.`, {
+      recordHipaaAudit("UPDATE_TREATMENT_PLAN", `Cambio de estado en procedimiento: "${targetProc.description}" a ${isBecomingCompleted ? 'COMPLETADO' : 'PENDIENTE'} para ${patient.name}.`, {
         patientId: patient.id,
         patientName: patient.name,
         resource: "Plan de Tratamiento ePHI",
         severity: "info"
       });
+
+      // Execute syncTreatmentToDentitoFinance upon finishing or confirming a treatment
+      if (isBecomingCompleted) {
+        await executeDentitoSyncForProcedure(targetProc);
+      }
     }
   };
 
@@ -935,6 +1049,7 @@ export default function TreatmentPlanModule({ patient, aranceles, onUpdatePatien
                     <th className="px-6 py-3 text-right">Valor Base</th>
                     <th className="px-6 py-3 text-right">Dto (%)</th>
                     <th className="px-6 py-3 text-right">Subtotal ($)</th>
+                    <th className="px-4 py-3 text-center">DentitoFinance</th>
                     <th className="px-6 py-3 text-center">Gestión</th>
                   </tr>
                 </thead>
@@ -1009,6 +1124,34 @@ export default function TreatmentPlanModule({ patient, aranceles, onUpdatePatien
                       <td className="px-6 py-3 whitespace-nowrap text-right font-mono font-bold text-slate-800 dark:text-slate-100">
                         ${subtotal.toLocaleString('es-CL')}
                       </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-center">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            executeDentitoSyncForProcedure(proc);
+                          }}
+                          disabled={syncingProcId === proc.id}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition-all cursor-pointer border ${
+                            proc.completed 
+                              ? "bg-teal-500/10 text-teal-700 dark:text-teal-300 border-teal-500/20 hover:bg-teal-500/20" 
+                              : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-teal-50 dark:hover:bg-teal-900/20"
+                          }`}
+                          title="Sincronizar con DentitoFinance"
+                        >
+                          {syncingProcId === proc.id ? (
+                            <>
+                              <RefreshCw className="w-3 h-3 animate-spin text-teal-500" />
+                              <span>Syncing...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Zap className="w-3 h-3 text-amber-500" />
+                              <span>{proc.completed ? "Reenviar Sync" : "Sync Finanzas"}</span>
+                            </>
+                          )}
+                        </button>
+                      </td>
                       <td className="px-6 py-3 whitespace-nowrap text-center text-red-500 cursor-pointer hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors" onClick={() => handleDelete(proc.id)}>
                         <Trash2 className="w-4 h-4 mx-auto" />
                       </td>
@@ -1020,20 +1163,61 @@ export default function TreatmentPlanModule({ patient, aranceles, onUpdatePatien
             </div>
             
             {/* Budget Summary Footer */}
-            <div className="bg-slate-50 dark:bg-slate-800/50 p-6 border-t border-slate-100 dark:border-slate-800 flex justify-between sm:justify-end items-center gap-8">
-              <div className="text-right space-y-1">
-                <p className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500">Ejecutado (Pagado)</p>
-                <div className="text-sm font-mono font-medium text-slate-600 dark:text-slate-400">${totalCompleted.toLocaleString('es-CL')}</div>
+            <div className="bg-slate-50 dark:bg-slate-800/50 p-6 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleSyncEntirePlanToDentito}
+                  disabled={isSyncingBatch || procedures.length === 0}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-teal-600 hover:bg-teal-500 text-white shadow-sm hover:shadow transition-all cursor-pointer disabled:opacity-50 active:scale-95"
+                  title="Sincronizar plan confirmado con DentitoFinance"
+                >
+                  {isSyncingBatch ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Sincronizando con Dentito...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-4 h-4 text-amber-300" />
+                      <span>Sincronizar con DentitoFinance</span>
+                    </>
+                  )}
+                </button>
+
+                {/* Direct Shortcut to Dentito Finance Platform */}
+                <a
+                  href={DENTITO_APP_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 transition-all cursor-pointer shadow-xs group"
+                  title="Abrir software financiero Dentito Finance en una nueva pestaña"
+                >
+                  <Zap className="w-3.5 h-3.5 text-amber-500 group-hover:scale-110 transition-transform" />
+                  <span>Abrir Dentito Finance</span>
+                  <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-amber-500" />
+                </a>
+
+                <span className="text-[11px] text-slate-400 hidden lg:inline font-mono">
+                  Webhook v02 Activo
+                </span>
               </div>
-              <div className="text-right space-y-1">
-                <p className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500">Total Restante</p>
-                <div className="text-sm font-mono font-medium text-amber-600 dark:text-amber-500">${totalRemaining.toLocaleString('es-CL')}</div>
-              </div>
-              <div className="text-right space-y-1 pl-6 border-l border-slate-200 dark:border-slate-700">
-                <p className="text-[10px] uppercase font-bold text-teal-600 dark:text-teal-400">Presupuesto Global</p>
-                <div className="text-xl font-mono font-black text-slate-900 dark:text-white flex flex-row items-center gap-1 justify-end">
-                   <DollarSign className="w-4 h-4 text-slate-400" />
-                   {totalCost.toLocaleString('es-CL')}
+
+              <div className="flex justify-between sm:justify-end items-center gap-6">
+                <div className="text-right space-y-1">
+                  <p className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500">Ejecutado (Pagado)</p>
+                  <div className="text-sm font-mono font-medium text-slate-600 dark:text-slate-400">${totalCompleted.toLocaleString('es-CL')}</div>
+                </div>
+                <div className="text-right space-y-1">
+                  <p className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500">Total Restante</p>
+                  <div className="text-sm font-mono font-medium text-amber-600 dark:text-amber-500">${totalRemaining.toLocaleString('es-CL')}</div>
+                </div>
+                <div className="text-right space-y-1 pl-6 border-l border-slate-200 dark:border-slate-700">
+                  <p className="text-[10px] uppercase font-bold text-teal-600 dark:text-teal-400">Presupuesto Global</p>
+                  <div className="text-xl font-mono font-black text-slate-900 dark:text-white flex flex-row items-center gap-1 justify-end">
+                     <DollarSign className="w-4 h-4 text-slate-400" />
+                     {totalCost.toLocaleString('es-CL')}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1113,6 +1297,37 @@ export default function TreatmentPlanModule({ patient, aranceles, onUpdatePatien
           </motion.div>
         </div>
       )}
+
+      {/* DentitoFinance Toast Notification */}
+      <AnimatePresence>
+        {dentitoToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 30, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className="fixed bottom-6 right-6 z-50 max-w-sm bg-slate-900/95 dark:bg-slate-950/95 backdrop-blur-md text-white p-4 rounded-2xl shadow-2xl border border-teal-500/40 flex items-start gap-3"
+          >
+            <div className="w-8 h-8 rounded-lg bg-teal-500/20 text-teal-400 flex items-center justify-center shrink-0 border border-teal-500/30">
+              <Zap className="w-4 h-4 text-amber-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold uppercase text-teal-300 tracking-wider">{dentitoToast.title}</span>
+                <button onClick={() => setDentitoToast(null)} className="text-slate-400 hover:text-white text-xs cursor-pointer">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <p className="text-xs font-semibold text-slate-100 truncate mt-0.5">{dentitoToast.treatment}</p>
+              <p className="text-[10px] text-slate-400">{dentitoToast.details}</p>
+              <div className="mt-1.5 flex items-center gap-2 text-[10px] font-mono">
+                <span className="text-teal-400 font-bold">${dentitoToast.amount.toLocaleString('es-CL')}</span>
+                <span className="text-slate-500">•</span>
+                <span className="text-slate-400 truncate">{dentitoToast.patientName}</span>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </div>
   );

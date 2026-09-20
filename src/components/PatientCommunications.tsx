@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { recordHipaaAudit } from "../utils/hipaaAudit";
+import { copyToClipboardSafely } from "../utils/safeClipboard";
 
 interface PatientCommunicationsProps {
   patient: Patient;
@@ -109,8 +110,8 @@ export default function PatientCommunications({
     recordCommunication("sent");
   };
 
-  const handleCopyClipboard = () => {
-    navigator.clipboard.writeText(messageBody);
+  const handleCopyClipboard = async () => {
+    await copyToClipboardSafely(messageBody);
     setCopiedSuccess(true);
     setTimeout(() => setCopiedSuccess(false), 2000);
     recordCommunication("queued");

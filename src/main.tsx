@@ -11,10 +11,16 @@ initClientDefenseShield();
 // Protect against external cross-origin iframe Script Errors
 if (typeof window !== 'undefined') {
   window.addEventListener('error', (event) => {
+    const msg = event.message || '';
+    const errName = event.error?.name || '';
     if (
-      event.message === 'Script error.' ||
+      msg === 'Script error.' ||
       !event.filename ||
-      (typeof event.message === 'string' && event.message.includes('Script error'))
+      msg.includes('Script error') ||
+      msg.includes('The operation is insecure') ||
+      msg.includes('SecurityError') ||
+      msg.includes('operation is insecure') ||
+      errName === 'SecurityError'
     ) {
       event.preventDefault();
       event.stopPropagation();
@@ -23,12 +29,17 @@ if (typeof window !== 'undefined') {
   }, true);
 
   window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason;
+    const msg = reason ? (reason.message || String(reason)) : '';
+    const errName = reason?.name || '';
     if (
-      event.reason &&
-      (event.reason === 'Script error.' ||
-        event.reason.message === 'Script error.' ||
-        event.reason.name === 'AbortError' ||
-        (typeof event.reason.message === 'string' && event.reason.message.includes('Script error')))
+      errName === 'SecurityError' ||
+      errName === 'AbortError' ||
+      msg === 'Script error.' ||
+      msg.includes('Script error') ||
+      msg.includes('The operation is insecure') ||
+      msg.includes('SecurityError') ||
+      msg.includes('operation is insecure')
     ) {
       event.preventDefault();
       event.stopPropagation();

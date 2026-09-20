@@ -3,6 +3,7 @@ import { TreatmentProcedure, Patient, InformedConsentRecord } from '../types';
 import { db, cleanForFirestore } from '../firebase';
 import { doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
+import { copyToClipboardSafely } from '../utils/safeClipboard';
 import { 
   FileCheck, 
   Camera, 
@@ -350,8 +351,8 @@ export const InformedConsentModal: React.FC<InformedConsentModalProps> = ({
   // WhatsApp & Link Sharing with Real-Time Session ID
   const mobileLink = `${window.location.origin}/?sign_session=${encodeURIComponent(qrSessionId)}`;
   
-  const handleCopyMobileLink = () => {
-    navigator.clipboard.writeText(mobileLink);
+  const handleCopyMobileLink = async () => {
+    await copyToClipboardSafely(mobileLink);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2500);
   };

@@ -9,6 +9,8 @@ import {
 } from "../utils/ephiEncryption";
 import { interceptFirestoreRead } from "../utils/firestoreInterceptor";
 import { motion, AnimatePresence } from "motion/react";
+import { safeStorage } from "../utils/safeStorage";
+import { copyToClipboardSafely } from "../utils/safeClipboard";
 import Logo from "./Logo";
 import NearbyClinicsDirectory from "./NearbyClinicsDirectory";
 import { 
@@ -60,7 +62,7 @@ export interface ExternalPatientPortalProps {
 function getAllKnownPatients(): Patient[] {
   const result: Patient[] = [...INITIAL_PATIENTS];
   try {
-    const raw1 = localStorage.getItem("perioPatients");
+    const raw1 = safeStorage.getItem("perioPatients");
     if (raw1) {
       const parsed: Patient[] = JSON.parse(raw1);
       if (Array.isArray(parsed)) {
@@ -74,7 +76,7 @@ function getAllKnownPatients(): Patient[] {
   } catch (e) {}
 
   try {
-    const raw2 = localStorage.getItem("perioPatients_data");
+    const raw2 = safeStorage.getItem("perioPatients_data");
     if (raw2) {
       const parsed: Patient[] = JSON.parse(raw2);
       if (Array.isArray(parsed)) {
@@ -98,37 +100,35 @@ function findPatientMatch(key: string): Patient | null {
 
   const patients = getAllKnownPatients();
   
-  // 1. Direct ID match
-  const byId = patients.find(p => p.id === clean || p.id === `pat-${clean}` || p.id?.toLowerCase() === cleanLower);
+  // 1. Direct secure ID match
+  const byId = patients.find(p => p.id === clean || p.id === `pat-${clean}`);
   if (byId) return byId;
 
-  // 2. RUT match normalized
-  if (normRut.length >= 4) {
+  // 2. Strict RUT match normalized (must be exact match)
+  if (normRut.length >= 7) {
     const byRut = patients.find(p => {
       if (!p.rut) return false;
       const pNorm = p.rut.replace(/[^0-9kK]/g, "").toUpperCase();
-      return pNorm === normRut || (normRut.length >= 7 && (pNorm.includes(normRut) || normRut.includes(pNorm)));
+      return pNorm === normRut;
     });
     if (byRut) return byRut;
   }
 
-  // 3. Exact DNI or Email match or Name match
+  // 3. Exact DNI or exact Email match (no loose substring or name matching to protect ePHI/PII)
   const byOther = patients.find(p => 
-    (p.rut && p.rut.trim().toLowerCase() === cleanLower) ||
     (p.dni && p.dni.trim().toLowerCase() === cleanLower) ||
-    (p.email && p.email.trim().toLowerCase() === cleanLower) ||
-    (p.name && p.name.trim().toLowerCase().includes(cleanLower))
+    (p.email && p.email.trim().toLowerCase() === cleanLower)
   );
   if (byOther) return byOther;
 
-  // 4. If key is "1" or "demo", fallback to first demo patient (Carlos Mendoza)
-  if (clean === "1" || cleanLower === "demo" || cleanLower === "demo1" || cleanLower.includes("carlos")) {
+  // 4. Explicit demo sandbox access keys only (for clinical evaluations)
+  if (cleanLower === "demo-1") {
     return patients[0] || null;
   }
-  if (clean === "2" || cleanLower === "demo2" || cleanLower.includes("valentina")) {
+  if (cleanLower === "demo-2") {
     return patients[1] || patients[0] || null;
   }
-  if (clean === "3" || cleanLower === "demo3" || cleanLower.includes("matias")) {
+  if (cleanLower === "demo-3") {
     return patients[2] || patients[0] || null;
   }
 
@@ -138,7 +138,7 @@ function findPatientMatch(key: string): Patient | null {
 export default function ExternalPatientPortal({ accessKey = "", onClose, initialMode = "lookup" }: ExternalPatientPortalProps) {
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     try {
-      const saved = localStorage.getItem("perioPortalTheme");
+      const saved = safeStorage.getItem("perioPortalTheme");
       return saved !== "light";
     } catch {
       return true;
@@ -149,17 +149,17 @@ export default function ExternalPatientPortal({ accessKey = "", onClose, initial
     setIsDarkMode((prev) => {
       const next = !prev;
       try {
-        localStorage.setItem("perioPortalTheme", next ? "dark" : "light");
+        safeStorage.setItem("perioPortalTheme", next ? "dark" : "light");
       } catch {}
       return next;
     });
   };
 
   const [copiedLink, setCopiedLink] = useState(false);
-  const handleCopyPortalLink = () => {
+  const handleCopyPortalLink = async () => {
     try {
       const url = window.location.origin + window.location.pathname + `?portal=${patientData?.rut || patientData?.id || currentKey || "1"}`;
-      navigator.clipboard.writeText(url);
+      await copyToClipboardSafely(url);
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2200);
     } catch {}
@@ -441,12 +441,12 @@ export default function ExternalPatientPortal({ accessKey = "", onClose, initial
         payments: []
       };
 
-      // 1. Instant Local State & LocalStorage Persistence (0ms latency)
+      // 1. Instant Local State & safeStorage Persistence (0ms latency)
       try {
         const localPatients = getAllKnownPatients();
         const updatedList = [newPatient, ...localPatients.filter(p => p.id !== newPatient.id && p.rut !== newPatient.rut)];
-        localStorage.setItem("perioPatients_data", JSON.stringify(updatedList));
-        localStorage.setItem("perioPatients", JSON.stringify(updatedList));
+        safeStorage.setItem("perioPatients_data", JSON.stringify(updatedList));
+        safeStorage.setItem("perioPatients", JSON.stringify(updatedList));
       } catch (e) {}
 
       // 2. Set State immediately for instant UI transition

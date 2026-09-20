@@ -29,7 +29,7 @@ export default function KeyboardShortcutsModal({ isOpen, onClose, onAction = () 
     { key: 'Alt + C', desc: 'Agendar nueva cita clínica', icon: Calendar },
     { key: 'Alt + O', desc: 'Ir directamente al Odontograma', icon: Stethoscope },
     { key: 'Alt + E', desc: 'Ir al Periodontograma interactivo', icon: Zap },
-    { key: 'Alt + S', desc: 'Activar Modo Sondaje Rápido (Teclado)', icon: Zap },
+    { key: 'Alt + S', desc: 'Activar Modo Sillón (Botones XL + Voz + Cámara)', icon: Stethoscope },
     { key: 'Alt + D', desc: 'Abrir Copiloto Dentito (Comandos de Voz)', icon: Mic },
   ];
 

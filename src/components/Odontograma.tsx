@@ -17,12 +17,13 @@ interface OdontogramaProps {
 
 type SelectedTool = "caries" | "obturado" | "sano";
 type DentitionMode = "permanente" | "temporal" | "mixta";
+type SectorFilter = "all" | "upper" | "lower" | "q1" | "q2" | "q3" | "q4";
 
 function OdontogramaComponent({ odontogram, onChange }: OdontogramaProps) {
   const [activeTool, setActiveTool] = useState<SelectedTool>("caries");
   const [selectedTooth, setSelectedTooth] = useState<number | null>(11);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [archFilter, setArchFilter] = useState<"all" | "upper" | "lower">("all");
+  const [archFilter, setArchFilter] = useState<SectorFilter>("all");
   const [dentitionMode, setDentitionMode] = useState<DentitionMode>("permanente");
 
   useEffect(() => {
@@ -268,13 +269,14 @@ function OdontogramaComponent({ odontogram, onChange }: OdontogramaProps) {
       </div>
 
       {/* Surface Brush Tools Selection */}
-      <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-100 dark:border-slate-800 flex flex-col lg:flex-row gap-4 items-center justify-between">
+      <div className="bg-slate-50 dark:bg-slate-800/40 p-3 sm:p-4 rounded-xl border border-slate-100 dark:border-slate-800 flex flex-col lg:flex-row gap-3 sm:gap-4 items-start lg:items-center justify-between">
         <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mr-2">Herramienta Pincel:</span>
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mr-1">Pincel:</span>
           
           <button 
+            type="button"
             onClick={() => setActiveTool("caries")}
-            className={`text-xs py-2 px-3.5 rounded-xl font-semibold transition-all inline-flex items-center gap-2 cursor-pointer border ${
+            className={`text-xs py-2 px-3 sm:px-3.5 rounded-xl font-semibold transition-all inline-flex items-center gap-2 cursor-pointer border min-h-[38px] ${
               activeTool === "caries" 
                 ? "bg-red-500 text-white border-red-500 shadow-md shadow-red-500/10" 
                 : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-50"
@@ -285,8 +287,9 @@ function OdontogramaComponent({ odontogram, onChange }: OdontogramaProps) {
           </button>
 
           <button 
+            type="button"
             onClick={() => setActiveTool("obturado")}
-            className={`text-xs py-2 px-3.5 rounded-xl font-semibold transition-all inline-flex items-center gap-2 cursor-pointer border ${
+            className={`text-xs py-2 px-3 sm:px-3.5 rounded-xl font-semibold transition-all inline-flex items-center gap-2 cursor-pointer border min-h-[38px] ${
               activeTool === "obturado" 
                 ? "bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-600/10" 
                 : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-50"
@@ -297,119 +300,152 @@ function OdontogramaComponent({ odontogram, onChange }: OdontogramaProps) {
           </button>
 
           <button 
+            type="button"
             onClick={() => setActiveTool("sano")}
-            className={`text-xs py-2 px-3.5 rounded-xl font-semibold transition-all inline-flex items-center gap-2 cursor-pointer border ${
+            className={`text-xs py-2 px-3 sm:px-3.5 rounded-xl font-semibold transition-all inline-flex items-center gap-2 cursor-pointer border min-h-[38px] ${
               activeTool === "sano" 
                 ? "bg-emerald-600 text-white border-emerald-600 shadow-md shadow-emerald-500/10" 
                 : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-50"
             }`}
           >
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-100 border border-emerald-600 shrink-0" />
-            <span>Saludable (Sano)</span>
+            <span>Sano</span>
           </button>
         </div>
 
-        <p className="text-[10px] text-slate-400 max-w-sm text-center lg:text-right font-light leading-relaxed">
-          * Pulsa la herramienta del pincel y luego haz clic sobre cualquier sector (vestibular, distal, lingual, mesial, oclusal) de un diente para pintarlo de inmediato.
+        <p className="text-[10px] text-slate-400 max-w-sm text-left lg:text-right font-light leading-relaxed">
+          * Pulsa la herramienta del pincel y haz clic sobre cualquier superficie dental para pintarla de inmediato.
         </p>
       </div>
 
       {/* Dentition Mode Switcher & Visual Guide Legend Block */}
-      <div className="bg-slate-50/70 dark:bg-slate-900/60 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4 select-none">
+      <div className="bg-slate-50/70 dark:bg-slate-900/60 rounded-2xl p-3 sm:p-4 border border-slate-200 dark:border-slate-800 flex flex-col gap-3 select-none">
         
         {/* Dentition Selector Tabs (Adult / Pediatric / Mixed) */}
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mr-1">Dentición:</span>
-          <div className="flex bg-slate-200/70 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700/60">
+          <div className="flex flex-wrap bg-slate-200/70 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700/60 gap-1">
             <button
+              type="button"
               onClick={() => { setDentitionMode("permanente"); setSelectedTooth(11); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                 dentitionMode === "permanente"
                   ? "bg-white dark:bg-slate-900 text-teal-600 dark:text-teal-400 shadow-xs"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
               }`}
             >
               <User className="w-3.5 h-3.5" />
-              <span>Permanente (Adulto 11-48)</span>
+              <span className="hidden sm:inline">Permanente (Adulto 11-48)</span>
+              <span className="sm:hidden">Adulto</span>
             </button>
 
             <button
+              type="button"
               onClick={() => { setDentitionMode("temporal"); setSelectedTooth(51); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                 dentitionMode === "temporal"
                   ? "bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-xs"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
               }`}
             >
               <Baby className="w-3.5 h-3.5" />
-              <span>Temporal (Pediátrico 51-85)</span>
+              <span className="hidden sm:inline">Temporal (Pediátrico 51-85)</span>
+              <span className="sm:hidden">Pediátrico</span>
             </button>
 
             <button
+              type="button"
               onClick={() => { setDentitionMode("mixta"); setSelectedTooth(11); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                 dentitionMode === "mixta"
                   ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
               }`}
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Dentición Mixta</span>
+              <span>Mixta</span>
             </button>
           </div>
 
-          {/* Arch Filter */}
-          <div className="flex bg-slate-200/60 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700/60 ml-0 sm:ml-2">
-            <button
-              onClick={() => setArchFilter("all")}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                archFilter === "all"
-                  ? "bg-white dark:bg-slate-900 text-teal-600 dark:text-teal-400 shadow-xs"
-                  : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
-              }`}
-            >
-              Ambas
-            </button>
-            <button
-              onClick={() => setArchFilter("upper")}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                archFilter === "upper"
-                  ? "bg-white dark:bg-slate-900 text-teal-600 dark:text-teal-400 shadow-xs"
-                  : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
-              }`}
-            >
-              Superior
-            </button>
-            <button
-              onClick={() => setArchFilter("lower")}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                archFilter === "lower"
-                  ? "bg-white dark:bg-slate-900 text-teal-600 dark:text-teal-400 shadow-xs"
-                  : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
-              }`}
-            >
-              Inferior
-            </button>
+          {/* Arch & Quadrant Filter Pills */}
+          <div className="flex flex-wrap items-center bg-slate-200/60 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700/60 gap-0.5">
+            {[
+              { id: "all", label: "Ambas" },
+              { id: "upper", label: "Sup" },
+              { id: "lower", label: "Inf" },
+              { id: "q1", label: "Q1 (18-11)" },
+              { id: "q2", label: "Q2 (21-28)" },
+              { id: "q3", label: "Q3 (31-38)" },
+              { id: "q4", label: "Q4 (48-41)" }
+            ].map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setArchFilter(f.id as SectorFilter)}
+                className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  archFilter === f.id
+                    ? "bg-white dark:bg-slate-900 text-teal-600 dark:text-teal-400 shadow-xs"
+                    : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
           </div>
         </div>
 
         {/* Legend */}
-        <div className="flex flex-wrap items-center gap-3 text-[10.5px] font-bold text-slate-500 dark:text-slate-400">
-          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-500" /> Caries Activa</span>
-          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Obturado (Resina)</span>
+        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 text-[10px] sm:text-[10.5px] font-bold text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200/50 dark:border-slate-800/50">
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-500" /> Caries</span>
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Obturado</span>
           <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-slate-100 border border-emerald-500/30" /> Sano</span>
           <span className="flex items-center gap-1.5"><span className="w-3 text-red-500 font-black text-center text-[12px] leading-none">&#10006;</span> Ausente</span>
-          <span className="flex items-center gap-1.5"><span className="w-3.5 h-3.5 rounded border-2 border-amber-500 bg-white dark:bg-slate-950 inline-block" /> Corona</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded border-2 border-amber-500 bg-white dark:bg-slate-950 inline-block" /> Corona</span>
           <span className="flex items-center gap-1.5"><span className="px-1 py-0.2 bg-teal-600 text-white font-extrabold text-[8px] rounded uppercase">Imp</span> Implante</span>
         </div>
       </div>
 
       {/* Main FDI Tooth Chart Layout */}
-      <div className="space-y-6 overflow-x-auto pb-4 pt-2">
+      <div className="space-y-6 overflow-x-auto pb-4 pt-2 hide-scrollbar">
         
-        {/* UPPER ARCHES */}
+        {/* SINGLE QUADRANT FOCUSED VIEW (Optimized for Mobile Screens) */}
+        {(archFilter === "q1" || archFilter === "q2" || archFilter === "q3" || archFilter === "q4") && (
+          <div className="flex flex-col items-center justify-center p-3 sm:p-5 bg-slate-50/50 dark:bg-slate-800/30 rounded-2xl border border-slate-200/50 dark:border-slate-800/50 space-y-3">
+            <span className="text-xs uppercase font-bold text-teal-600 dark:text-teal-400 tracking-wider">
+              {archFilter === "q1" && "Cuadrante 1: Maxilar Superior Derecho (18 - 11)"}
+              {archFilter === "q2" && "Cuadrante 2: Maxilar Superior Izquierdo (21 - 28)"}
+              {archFilter === "q3" && "Cuadrante 3: Mandibular Inferior Izquierdo (31 - 38)"}
+              {archFilter === "q4" && "Cuadrante 4: Mandibular Inferior Derecho (48 - 41)"}
+            </span>
+
+            {/* Adult Teeth in Quadrant */}
+            {(dentitionMode === "permanente" || dentitionMode === "mixta") && (
+              <div className="flex flex-wrap justify-center gap-1.5 sm:gap-2">
+                {archFilter === "q1" && UPPER_TEETH.right.map((num) => renderToothSVG(num))}
+                {archFilter === "q2" && UPPER_TEETH.left.map((num) => renderToothSVG(num))}
+                {archFilter === "q3" && LOWER_TEETH.left.map((num) => renderToothSVG(num))}
+                {archFilter === "q4" && LOWER_TEETH.right.map((num) => renderToothSVG(num))}
+              </div>
+            )}
+
+            {/* Pediatric Teeth in Quadrant */}
+            {(dentitionMode === "temporal" || dentitionMode === "mixta") && (
+              <div className="flex flex-wrap justify-center gap-1.5 sm:gap-2 pt-3 border-t border-amber-200/40 dark:border-amber-900/30">
+                <span className="text-[10px] uppercase font-bold text-amber-700 dark:text-amber-400 tracking-wider block w-full text-center">
+                  Dentición Temporal Decidua
+                </span>
+                {archFilter === "q1" && PEDIATRIC_UPPER_TEETH.right.map((num) => renderToothSVG(num))}
+                {archFilter === "q2" && PEDIATRIC_UPPER_TEETH.left.map((num) => renderToothSVG(num))}
+                {archFilter === "q3" && PEDIATRIC_LOWER_TEETH.left.map((num) => renderToothSVG(num))}
+                {archFilter === "q4" && PEDIATRIC_LOWER_TEETH.right.map((num) => renderToothSVG(num))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* FULL ARCHES (ALL, UPPER, LOWER) */}
         {(archFilter === "all" || archFilter === "upper") && (
-          <div className="space-y-4 min-w-[760px]">
+          <div className="space-y-4 min-w-[740px]">
             {/* Adult Upper Arch (if permanente or mixta) */}
             {(dentitionMode === "permanente" || dentitionMode === "mixta") && (
               <div className="space-y-2">
@@ -450,7 +486,7 @@ function OdontogramaComponent({ odontogram, onChange }: OdontogramaProps) {
 
         {/* LOWER ARCHES */}
         {(archFilter === "all" || archFilter === "lower") && (
-          <div className="space-y-4 min-w-[760px] pt-4 border-t border-slate-100 dark:border-slate-800/50">
+          <div className="space-y-4 min-w-[740px] pt-4 border-t border-slate-100 dark:border-slate-800/50">
             {/* Pediatric Lower Arch (if temporal or mixta) */}
             {(dentitionMode === "temporal" || dentitionMode === "mixta") && (
               <div className="space-y-2 bg-amber-50/30 dark:bg-amber-950/10 p-3 rounded-2xl border border-amber-200/40 dark:border-amber-900/30">
@@ -516,24 +552,26 @@ function OdontogramaComponent({ odontogram, onChange }: OdontogramaProps) {
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5 sm:gap-2">
               {[
-                { id: "sano", label: "Saludable" },
-                { id: "ausente", label: "Ausente / Extracción" },
-                { id: "corona", label: "Corona Protésica" },
-                { id: "endodoncia", label: "Conducto (Endodoncia/Pulpotomía)" },
-                { id: "implante", label: "Implante de Titanio" }
+                { id: "sano", label: "Saludable", short: "Sano" },
+                { id: "ausente", label: "Ausente / Extracción", short: "Ausente" },
+                { id: "corona", label: "Corona Protésica", short: "Corona" },
+                { id: "endodoncia", label: "Conducto (Endodoncia)", short: "Endo" },
+                { id: "implante", label: "Implante de Titanio", short: "Implante" }
               ].map((cond) => (
                 <button
                   key={cond.id}
+                  type="button"
                   onClick={() => handleConditionChange(selectedTooth, cond.id as ToothState["condition"])}
-                  className={`text-xs py-2 px-4 rounded-xl font-semibold transition-all border cursor-pointer ${
+                  className={`text-xs py-2 px-2.5 sm:px-4 rounded-xl font-semibold transition-all border cursor-pointer min-h-[38px] flex items-center justify-center ${
                     currentToothState.condition === cond.id
                       ? "bg-slate-900 border-slate-900 text-white dark:bg-white dark:text-slate-900 dark:border-white shadow-md shadow-slate-900/15"
                       : "bg-white dark:bg-slate-900 border-slate-200 text-slate-700 dark:text-slate-300 hover:bg-slate-100"
                   }`}
                 >
-                  {cond.label}
+                  <span className="hidden sm:inline">{cond.label}</span>
+                  <span className="sm:hidden">{cond.short}</span>
                 </button>
               ))}
             </div>

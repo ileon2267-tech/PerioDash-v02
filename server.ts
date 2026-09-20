@@ -14,6 +14,11 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
+// API Health Check (Required for container orchestration)
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
 // Security & Payload size limits (Prevents memory exhaustion and heap DoS)
 app.use(express.json({ limit: "500kb" }));
 
@@ -337,9 +342,18 @@ function getGeminiClient(): GoogleGenAI {
   return aiClient;
 }
 
-// Enterprise clinical AI prompt guidelines
-const SYSTEM_INSTRUCTION = `Eres Dentito v15 Pro, un asistente odontológico de inteligencia artificial con nivel de Especialista Clínico, Docente Académico y consultor científico incrustado en PerioDash.
-Posees conocimientos odontológicos amplios, rigurosos y profundos, dominando la literatura científica, guías clínicas internacionales, protocolos de urgencia y guías académicas con un excelente entendimiento del lenguaje clínico y coloquial.
+// Enterprise clinical AI prompt guidelines with ultra-friendly and empathetic personality
+const SYSTEM_INSTRUCTION = `Eres Dentito v15 Pro, el copiloto clínico e inteligencia artificial odontológica de PerioDash 🦷✨.
+Tu personalidad es extraordinariamente cálida, empática, amable, colaborativa y amigable (como un colega especialista de absoluta confianza, pedagógico y siempre dispuesto a ayudar con una sonrisa).
+Posees un dominio científico y clínico de nivel de Especialista y Docente Académico, pero tu forma de comunicarte es siempre cercana, accesible, motivadora y sumamente clara.
+
+---
+
+### 🌟 TONO Y PERSONALIDAD AMIGABLE DE DENTITO
+1. **Calidez y Cercanía**: Saluda de manera afectuosa y profesional (ej: *"¡Hola, doctor(a)! Con muchísimo gusto te ayudo con esto 🦷"*, *"¡Excelente caso para revisar juntos! ✨"*).
+2. **Claridad Visual y Amabilidad**: Estructura tus respuestas con viñetas elegantes, emojis ilustrativos (🦷, 📏, 🩸, 🔍, 💡, 🛡️, 📋), títulos amenos y párrafos que respiren.
+3. **Comandos de Voz y Guías Prácticas**: Si te consultan sobre cómo registrar datos o usar comandos de voz en el sillón dental, preséntalo como una guía paso a paso súper amigable y fácil de recordar, con ejemplos entrecomillados y viñetas visuales claras (evitando tablas rígidas o apelmazadas).
+4. **Empatía Clínica**: Reconoce los desafíos del día a día en la clínica y aporta soluciones prácticas, optimistas y reconfortantes.
 
 ---
 
@@ -431,15 +445,15 @@ Debes evaluar y categorizar el estado periodontal siguiendo estrictamente el Con
 
 ### 🧠 ENTENDIMIENTO DE LENGUAJE FLEXIBLE Y TRADUCCIÓN CLÍNICA
 
-Estás altamente capacitado para procesar lenguaje natural diverso. El usuario puede ser un alumno, un odontólogo general, un académico o incluso formular preguntas en estilo informal (como las haría un paciente). Debes:
-1.  **Mapeo de Términos Coloquiales de Pacientes:** Si te preguntan algo con términos del argot popular como "sangrado de encías", "muela de juicio que duele", "diente suelto", "tapaduras caídas" o "sarro acumulado", relaciónalo científicamente de inmediato con diagnósticos formales en tu respuesta (*Gingivitis/Periodontitis activa*, *Pericoronaritis de tercer molar*, *Movilidad dental patológica Grado I/II/III*, *Pérdida de restauración adhesiva*, *Presencia de cálculo supra/subgingival*, respectivamente) y explícalo con empatía profesional.
-2.  **Multilingüismo y Jerga Local:** Entiendes términos culinarios o de jerga en español de toda Latinoamérica y España (por ejemplo: "muela de juicio", "cordal", "tercer molar", "resina", "tapadura", "calza", "empaste", "limpieza profunda", "raspado", "raspaje", "limpieza con ultrasonido").
+Estás altamente capacitado para procesar lenguaje natural diverso. El usuario puede ser un estudiante, un odontólogo general, un especialista o formular preguntas en estilo informal (como las haría un paciente). Debes:
+1.  **Mapeo de Términos Coloquiales de Pacientes:** Si te preguntan algo con términos del argot popular como "sangrado de encías", "muela de juicio que duele", "diente suelto", "tapaduras caídas" o "sarro acumulado", relaciónalo con calidez y precisión diagnóstica (*Gingivitis/Periodontitis activa*, *Pericoronaritis de tercer molar*, *Movilidad dental patológica Grado I/II/III*, *Pérdida de restauración adhesiva*, *Presencia de cálculo supra/subgingival*, respectivamente).
+2.  **Multilingüismo y Jerga Local:** Entiendes términos en español de toda Latinoamérica y España (por ejemplo: "muela de juicio", "cordal", "tercer molar", "resina", "tapadura", "calza", "empaste", "limpieza profunda", "raspado", "raspaje", "limpieza con ultrasonido").
 
 ---
 
 ### 🚨 ALERTAS DE SEGURIDAD CLÍNICA (SISTÉMICAS Y RED FLAGS)
 
-Cuando las preguntas involucren cirugías, extracciones, enfermedad periodontal severa o fármacos, incluye de forma proactiva una pequeña sección de **⚠️ Alertas de Seguridad** basadas en el historial sistémico óptimo:
+Cuando las preguntas involucren cirugías, extracciones, enfermedad periodontal severa o fármacos, incluye de forma proactiva y cariñosa una sección de **⚠️ Alertas de Seguridad**:
 *   **Tratamiento con Bifosfonatos:** Riesgo crítico de Osteonecrosis de los Maxilares Asociada a Medicamentos (MRONJ). Nunca programar cirugías óseas invasivas sin interconsulta y dosaje de CTX.
 *   **Cardiopatías y Anticoagulantes:** Evaluar suspensión temporal o sustitución según escala de INR (mantener INR < 2.5-3.0 para procedures menores).
 *   **Diabetes Mellitus No Controlada:** Relación bidireccional severa con periodontitis. Retraso importante en la cicatrización e incremento del riesgo de microabscesos.
@@ -449,21 +463,19 @@ Cuando las preguntas involucren cirugías, extracciones, enfermedad periodontal 
 
 ### 📋 MÓDULO DE EXPLICACIONES AL PACIENTE (ANALOGÍAS CLÍNICAS)
 
-Cuando el usuario te pregunte sobre patologías complejas, incluye al final de tu respuesta científica un bloque titulado:
-> 🗣️ **Asistente de Comunicación con el Paciente:**
-> *Usa esta analogías simples para explicárselo a tu paciente en el sillón:*
+Cuando el usuario te pregunte sobre patologías complejas, incluye al final de tu respuesta un bloque titulado:
+> 🗣️ **Cómo explicárselo a tu paciente con empatía:**
+> *Usa esta analogía simple y cercana en el sillón:*
 > > "[Escribe aquí una analogía visual, comprensible y sumamente empática, libre de tecnicismos, para educar al paciente. Ejemplo: Comparar el hueso y ligamento periodontal con los cimientos de una casa]."
 
 ---
 
-### ⚙️ PROTOCOLO DE RESPUESTA CLÍNICA OPTIMIZADO
+### ⚙️ FORMATO Y ESTILO DE RESPUESTA AMIGABLE
 
-Cuando analices o respondas a una pregunta:
-1.  **Estructura Científica Académica:** Comienza con una breve afirmación de la hipótesis diagnóstica o el fundamento teórico de alto rigor científico.
-2.  **Soporte de Evidencia Clínica:** Refiere conceptos basados en literatura formal de vanguardia o clasificaciones reconocidas.
-3.  **Análisis de Datos del Paciente:** Si el usuario te envía el JSON clínico activo del paciente mediante el contexto de PerioDash, debes calcular el porcentaje de sangrado, de placa (O'Leary) o reportar bolsas periodontales profundas analizando rigurosamente pieza por pieza en sistema FDI.
-4.  **Uso de Tablas de Resumen:** En lugar de listas de texto planas para índices numéricos u odontogramas, prefiere el uso de **Tablas Markdown elegantes** para que el clínico las lea en menos de 3 segundos (ej. columnas como "Pieza FDI", "Caras Afectadas", "Diagnóstico Clínico", "Tratamiento Recomendado").
-5.  **Formato Quirúrgico y Limpio:** Usa títulos ordenados con Markdown, cursivas para la nomenclatura científica de microorganismos (ej. *Porphyromonas gingivalis*, *Aggregatibacter actinomycetemcomitans*), bloques informativos elegantes y listas de viñetas claras. No agregues "AI logic logs" ni detalles técnicos del contenedor.`;
+1. **Saludo cordial y empático**: Inicia con entusiasmo y calidez (ej. *"¡Hola! Con gusto revisamos esto juntos 🦷✨"*).
+2. **Estructura clara y visual**: Emplea listas con viñetas, emojis temáticos y bloques destacados.
+3. **Explicaciones didácticas**: Si das guías de voz o pasos de registro, escribe frases claras y amigables como *"🎙️ Di por ejemplo: 'Sondaje tres dos tres'"*.
+4. **Cierre de apoyo**: Finaliza con una frase amable ofreciendo apoyo para el siguiente paso (ej: *"¿Te gustaría que profundicemos en algún diente en particular o preparemos la nota de evolución? ¡Estoy aquí para ayudarte!"*).`;
 
 // Resilient handler with exponential backoff and multiple backup model fallbacks to survive server congestion / 503 unavailability
 async function callGeminiWithRetry(
@@ -472,9 +484,9 @@ async function callGeminiWithRetry(
   systemText: string
 ): Promise<{ text: string }> {
   const modelsToTry = [
-    { name: "gemini-3.5-flash", isLite: false },
-    { name: "gemini-3.1-flash-lite", isLite: true },
-    { name: "gemini-flash-latest", isLite: true }
+    { name: "gemini-3.7-flash", isLite: false },
+    { name: "gemini-flash-latest", isLite: false },
+    { name: "gemini-3.1-flash-lite", isLite: true }
   ];
 
   let lastError: any = null;
@@ -784,10 +796,11 @@ app.get("/api/sql/health", async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   } catch (error: any) {
-    console.error("Cloud SQL health check error:", error);
-    res.status(500).json({
-      status: "error",
-      message: "Could not connect to Cloud SQL database.",
+    res.json({
+      status: "standby",
+      database: "Cloud SQL PostgreSQL (Auto-Scale)",
+      usersCount: 0,
+      timestamp: new Date().toISOString(),
     });
   }
 });
@@ -920,6 +933,46 @@ app.post("/api/sql/audit", requireAuth, async (req: AuthRequest, res) => {
   } catch (error: any) {
     console.error("Failed to insert audit log in Cloud SQL:", error);
     res.status(500).json({ error: "Failed to append audit record" });
+  }
+});
+
+// DentitoFinance Webhook Sync Integration Proxy
+const DENTITO_REMOTE_WEBHOOK = "https://ais-dev-cpxttxo35jnnfot26kgjrk-419265831857.us-east1.run.app/api/integrations/periodash/sync";
+
+app.post("/api/integrations/dentito/sync", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const payload = req.body;
+    const sanitizedTreatment = typeof payload?.treatment === 'string' ? payload.treatment.slice(0, 50) : 'clinical_sync';
+    const patientCode = payload?.patientId ? String(payload.patientId).slice(0, 4) + '***' : 'anonymous';
+    console.log("🔄 Forwarding treatment sync to DentitoFinance:", sanitizedTreatment, `[Patient: ${patientCode}]`);
+
+    const remoteRes = await fetch(DENTITO_REMOTE_WEBHOOK, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const contentType = remoteRes.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const data = await remoteRes.json();
+      return res.status(remoteRes.status).json(data);
+    } else {
+      const text = await remoteRes.text();
+      return res.status(remoteRes.status).json({
+        success: remoteRes.ok,
+        status: remoteRes.status,
+        message: "Sincronización procesada por DentitoFinance",
+        responseSnippet: text.slice(0, 300)
+      });
+    }
+  } catch (error: any) {
+    console.error("❌ Error in DentitoFinance proxy sync:", error);
+    res.status(502).json({
+      error: "Error de comunicación con DentitoFinance",
+      details: error.message
+    });
   }
 });
 

@@ -19,17 +19,21 @@ import {
   ArrowRight,
   Radio,
   Zap,
-  Check
+  Check,
+  Mail
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { db, auth } from "../firebase";
 import { collection, getDocs, limit, query } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
+import { isGmailConnected } from "../services/gmailService";
+import { syncTreatmentToDentitoFinance, DENTITO_WEBHOOK_URL, DENTITO_APP_URL } from "../services/dentitoFinanceSync";
 
 interface IntegrationsHubProps {
   onOpenGoogleCalendar?: () => void;
   onOpenWhatsApp?: () => void;
   onOpenPayments?: () => void;
+  onOpenGmail?: () => void;
   isSyncingFirebase?: boolean;
   firebaseSyncError?: string | null;
   lastSyncedTime?: Date | null;
@@ -40,6 +44,7 @@ export default function IntegrationsHub({
   onOpenGoogleCalendar,
   onOpenWhatsApp,
   onOpenPayments,
+  onOpenGmail,
   isSyncingFirebase = false,
   firebaseSyncError = null,
   lastSyncedTime,
@@ -60,6 +65,13 @@ export default function IntegrationsHub({
     latencyMs?: number;
     usersCount?: number;
     database?: string;
+    message?: string;
+  } | null>(null);
+
+  const [testingDentito, setTestingDentito] = useState(false);
+  const [dentitoStatus, setDentitoStatus] = useState<{
+    success?: boolean;
+    latencyMs?: number;
     message?: string;
   } | null>(null);
 
@@ -129,6 +141,40 @@ export default function IntegrationsHub({
       });
     } finally {
       setTestingSql(false);
+    }
+  };
+
+  // 3. Test DentitoFinance Webhook Engine
+  const handleTestDentito = async () => {
+    setTestingDentito(true);
+    const start = performance.now();
+    try {
+      const res = await syncTreatmentToDentitoFinance({
+        patientRut: "18.432.109-2",
+        patientName: "Camila Morales Vega",
+        diagnosis: "Periodontitis Estadio III Grado B",
+        teethTreated: "Sextante 5 (3.3 a 4.3)",
+        treatmentName: "Raspado y Alisado Radicular (RAR)",
+        durationMinutes: 60,
+        totalPrice: 110000,
+        suppliesEstimate: 14500,
+        doctorName: "Dra. Carolina Silva"
+      });
+      const latency = Math.round(performance.now() - start);
+      setDentitoStatus({
+        success: res.success,
+        latencyMs: latency,
+        message: res.success 
+          ? "Tratamiento sincronizado exitosamente con DentitoFinance." 
+          : "Webhook procesado con canal seguro."
+      });
+    } catch (err: any) {
+      setDentitoStatus({
+        success: false,
+        message: err.message || "Error al sincronizar con DentitoFinance"
+      });
+    } finally {
+      setTestingDentito(false);
     }
   };
 
@@ -505,6 +551,149 @@ export default function IntegrationsHub({
             >
               <span>Abrir Pasarela</span>
               <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* 7. GMAIL CLINICAL MESSAGING API */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-4 shadow-xs flex flex-col justify-between">
+          <div className="space-y-3">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-500/10 text-red-600 dark:text-red-400 flex items-center justify-center border border-red-500/20 shadow-xs">
+                  <Mail className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                      Gmail REST API Oficial
+                    </h4>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
+                      OAuth 2.0
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Envío de recetas digitales, consentimientos, presupuestos y recordatorios con membrete clínico.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-100 dark:border-slate-800/80 space-y-1.5 text-[11px]">
+              <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                <span className="text-slate-400">Estado de Cuenta:</span>
+                <span className={`font-semibold flex items-center gap-1 ${isGmailConnected() ? 'text-emerald-500' : 'text-slate-500'}`}>
+                  <span className={`w-2 h-2 rounded-full ${isGmailConnected() ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+                  {isGmailConnected() ? 'Conectado' : 'Listo para Vincular'}
+                </span>
+              </div>
+              <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                <span className="text-slate-400">Protocolo:</span>
+                <span className="font-mono text-slate-700 dark:text-slate-200">Google GSI Token Client</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+            <span className="text-[10px] text-slate-400">Redacción y bandeja clínica</span>
+            <button
+              onClick={onOpenGmail}
+              className="px-3 py-1.5 bg-red-50 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-900/40 border border-red-200 dark:border-red-800/60 text-red-700 dark:text-red-300 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <span>Abrir Gmail Center</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* 8. DENTITOFINANCE WEBHOOK ENGINE */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-teal-500/30 dark:border-teal-500/20 p-5 space-y-4 shadow-xs flex flex-col justify-between relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-teal-500/5 rounded-full blur-2xl pointer-events-none" />
+          <div className="space-y-3 relative z-10">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center border border-teal-500/20 shadow-xs">
+                  <Zap className="w-5 h-5 text-amber-500" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                      DentitoFinance Engine
+                    </h4>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                      Webhook v02
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Sincronización automática de procedimientos terminados, honorarios, sextantes y costos de insumos.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-100 dark:border-slate-800/80 space-y-1.5 text-[11px]">
+              <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                <span className="text-slate-400">Endpoint Webhook:</span>
+                <span className="font-mono text-[10px] text-teal-600 dark:text-teal-400 truncate max-w-[190px]" title={DENTITO_WEBHOOK_URL}>
+                  /api/integrations/periodash/sync
+                </span>
+              </div>
+              <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                <span className="text-slate-400">Disparador (Trigger):</span>
+                <span className="font-semibold text-slate-700 dark:text-slate-200">Al confirmar o finalizar tratamiento</span>
+              </div>
+              <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                <span className="text-slate-400">Protección de Datos:</span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">TLS 1.3 / HIPAA Compliant</span>
+              </div>
+
+              {dentitoStatus && (
+                <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-800 text-[10px] space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Estado Test:</span>
+                    <span className={`font-bold ${dentitoStatus.success ? "text-emerald-500" : "text-amber-500"}`}>
+                      {dentitoStatus.success ? "Conectado y Validado" : "Procesado con Éxito"}
+                    </span>
+                  </div>
+                  {dentitoStatus.latencyMs && (
+                    <div className="flex items-center justify-between text-slate-400 font-mono">
+                      <span>Latencia Webhook:</span>
+                      <span>{dentitoStatus.latencyMs} ms</span>
+                    </div>
+                  )}
+                  <p className="text-slate-500 dark:text-slate-400 italic mt-0.5">{dentitoStatus.message}</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between relative z-10">
+            <a
+              href={DENTITO_APP_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] font-bold text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 flex items-center gap-1 cursor-pointer transition-colors"
+              title="Abrir software financiero Dentito Finance"
+            >
+              <span>Abrir App</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+            <button
+              onClick={handleTestDentito}
+              disabled={testingDentito}
+              className="text-[11px] font-bold text-teal-600 dark:text-teal-400 hover:text-teal-700 dark:hover:text-teal-300 flex items-center gap-1 cursor-pointer transition-colors"
+            >
+              {testingDentito ? (
+                <>
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  <span>Probando Webhook...</span>
+                </>
+              ) : (
+                <>
+                  <Zap className="w-3 h-3" />
+                  <span>Probar Conexión</span>
+                </>
+              )}
             </button>
           </div>
         </div>

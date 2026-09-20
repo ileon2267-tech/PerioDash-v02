@@ -227,3 +227,35 @@ html:not(.dark) .glass-panel {
   }
 }
 
+/* ==========================================================================
+   #clinical-area Flexible Grid / Flexbox Architecture & Responsive Collapse
+   ========================================================================== */
+#clinical-area {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  width: 100%;
+}
+
+@media (min-width: 1024px) {
+  #clinical-area {
+    gap: 1.125rem;
+  }
+}
+
+/* Responsive auto-collapse for informative elements and secondary buttons on reduced screen widths */
+@media (max-width: 768px) {
+  #clinical-area .clinical-collapsible-text {
+    display: none !important;
+  }
+
+  #clinical-area .clinical-actions-row {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+  }
+
+  #clinical-area .clinical-alerts-verbose {
+    display: none !important;
+  }
+}
+

@@ -23,6 +23,7 @@ import {
   UploadCloud
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { safeStorage } from "../utils/safeStorage";
 
 export interface DentalListing {
   id: string;
@@ -137,7 +138,7 @@ const DEFAULT_LISTINGS: DentalListing[] = [
 
 export default function DentalMarketplace() {
   const [listings, setListings] = useState<DentalListing[]>(() => {
-    const saved = localStorage.getItem("perioDentalListings");
+    const saved = safeStorage.getItem("perioDentalListings");
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -253,12 +254,12 @@ export default function DentalMarketplace() {
   };
 
   useEffect(() => {
-    localStorage.setItem("perioDentalListings", JSON.stringify(listings));
+    safeStorage.setItem("perioDentalListings", JSON.stringify(listings));
   }, [listings]);
 
   // Load current user context if available to prefill listing contact info
   useEffect(() => {
-    const userSaved = localStorage.getItem("perioActiveUser");
+    const userSaved = safeStorage.getItem("perioActiveUser");
     if (userSaved) {
       try {
         const u = JSON.parse(userSaved);

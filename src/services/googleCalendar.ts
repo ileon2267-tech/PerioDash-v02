@@ -7,32 +7,21 @@ import {
 } from 'firebase/auth';
 import { auth } from '../firebase';
 import { Appointment, Patient } from '../types';
+import firebaseConfig from '../../firebase-applet-config.json';
 
 export const SCOPES = [
-  'https://www.googleapis.com/auth/calendar',
-  'https://www.googleapis.com/auth/calendar.acls',
-  'https://www.googleapis.com/auth/calendar.acls.readonly',
-  'https://www.googleapis.com/auth/calendar.app.created',
-  'https://www.googleapis.com/auth/calendar.calendarlist',
-  'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
-  'https://www.googleapis.com/auth/calendar.calendars',
-  'https://www.googleapis.com/auth/calendar.calendars.readonly',
   'https://www.googleapis.com/auth/calendar.events',
-  'https://www.googleapis.com/auth/calendar.events.freebusy',
-  'https://www.googleapis.com/auth/calendar.events.owned',
-  'https://www.googleapis.com/auth/calendar.events.owned.readonly',
-  'https://www.googleapis.com/auth/calendar.events.public.readonly',
-  'https://www.googleapis.com/auth/calendar.events.readonly',
-  'https://www.googleapis.com/auth/calendar.freebusy',
-  'https://www.googleapis.com/auth/calendar.readonly',
-  'https://www.googleapis.com/auth/calendar.settings.readonly'
 ];
 
 const provider = new GoogleAuthProvider();
 SCOPES.forEach(scope => provider.addScope(scope));
+provider.setCustomParameters({
+  prompt: 'select_account',
+});
 
 // In-memory cache for the access token (Never store token in localStorage for security)
 let cachedAccessToken: string | null = null;
+let cachedGoogleUser: User | null = null;
 let isSigningIn = false;
 
 export const initCalendarAuth = (
@@ -41,23 +30,125 @@ export const initCalendarAuth = (
 ) => {
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user && cachedAccessToken) {
+      cachedGoogleUser = user;
       if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
+    } else if (cachedGoogleUser && cachedAccessToken) {
+      if (onAuthSuccess) onAuthSuccess(cachedGoogleUser, cachedAccessToken);
     } else if (!isSigningIn) {
       if (onAuthFailure) onAuthFailure();
     }
   });
 };
 
+const ensureGsiLoaded = async (): Promise<boolean> => {
+  if (typeof window === 'undefined') return false;
+  if ((window as any).google?.accounts?.oauth2) return true;
+  return new Promise((resolve) => {
+    const existing = document.querySelector('script[src*="accounts.google.com/gsi/client"]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(true));
+      existing.addEventListener('error', () => resolve(false));
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.head.appendChild(script);
+  });
+};
+
+const signInWithGis = async (): Promise<{ user: User; accessToken: string }> => {
+  await ensureGsiLoaded();
+  return new Promise((resolve, reject) => {
+    const google = (window as any).google;
+    if (!google?.accounts?.oauth2) {
+      reject(new Error('Google Identity Services no está disponible.'));
+      return;
+    }
+    const oAuthClientId = (firebaseConfig as any).oAuthClientId;
+    if (!oAuthClientId) {
+      reject(new Error('No se encontró oAuthClientId configurado.'));
+      return;
+    }
+
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: oAuthClientId,
+      scope: SCOPES.join(' '),
+      prompt: 'select_account',
+      callback: async (response: any) => {
+        if (response.error) {
+          reject(new Error(response.error_description || response.error || 'Error al autorizar con Google'));
+          return;
+        }
+        const token = response.access_token;
+        cachedAccessToken = token;
+
+        try {
+          const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const profile = await profileRes.json();
+          const mockUser = {
+            uid: profile.sub || 'gis-user',
+            email: profile.email || 'usuario@google.com',
+            displayName: profile.name || 'Usuario Google Calendar',
+            photoURL: profile.picture || null,
+          } as unknown as User;
+          cachedGoogleUser = mockUser;
+          resolve({ user: mockUser, accessToken: token });
+        } catch {
+          const fallbackUser = {
+            uid: 'gis-user',
+            email: 'Google Calendar Activo',
+            displayName: 'Usuario Google',
+            photoURL: null,
+          } as unknown as User;
+          cachedGoogleUser = fallbackUser;
+          resolve({ user: fallbackUser, accessToken: token });
+        }
+      },
+    });
+
+    client.requestAccessToken();
+  });
+};
+
 export const signInWithGoogleCalendar = async (): Promise<{ user: User; accessToken: string } | null> => {
   try {
     isSigningIn = true;
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('No se pudo obtener el token de acceso de Google Calendar.');
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        cachedAccessToken = credential.accessToken;
+        cachedGoogleUser = result.user;
+        return { user: result.user, accessToken: cachedAccessToken };
+      }
+    } catch (popupError: any) {
+      console.warn('Intento con signInWithPopup avisó:', popupError?.code || popupError?.message);
+
+      // Si falla por popup bloqueado, restricción de origen en iframe, o falta de token directo, intentar vía GIS
+      if ((window as any).google?.accounts?.oauth2) {
+        return await signInWithGis();
+      }
+
+      if (popupError?.code === 'auth/popup-blocked') {
+        throw new Error('La ventana emergente fue bloqueada por tu navegador. Por favor permite popups para este sitio.');
+      }
+      if (popupError?.code === 'auth/popup-closed-by-user') {
+        throw new Error('El inicio de sesión fue cancelado al cerrar la ventana emergente.');
+      }
+      throw popupError;
     }
-    cachedAccessToken = credential.accessToken;
-    return { user: result.user, accessToken: cachedAccessToken };
+
+    if ((window as any).google?.accounts?.oauth2) {
+      return await signInWithGis();
+    }
+
+    throw new Error('No se pudo obtener el token de acceso de Google Calendar.');
   } catch (error: any) {
     console.error('Google Calendar Sign-in Error:', error);
     throw error;
@@ -71,11 +162,18 @@ export const getCalendarAccessToken = (): string | null => {
 };
 
 export const disconnectGoogleCalendar = async () => {
-  try {
-    await signOut(auth);
-  } finally {
-    cachedAccessToken = null;
+  if (cachedAccessToken) {
+    try {
+      fetch(`https://oauth2.googleapis.com/revoke?token=${cachedAccessToken}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      }).catch(() => {});
+    } catch {
+      // Ignorar errores de revocación silenciosa
+    }
   }
+  cachedAccessToken = null;
+  cachedGoogleUser = null;
 };
 
 export interface GoogleCalendarEvent {

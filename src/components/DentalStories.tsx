@@ -1,6 +1,36 @@
 import React, { useState, useRef, useEffect } from "react";
-import { MessageSquare, Share2, Coins, ArrowUpRight, Upload, Download, FileText, CheckCircle, Search, UserCheck, Heart, Sparkles, Filter, ChevronRight, DollarSign, Paperclip, Trash2, Image as ImageIcon, Sparkle, X } from "lucide-react";
+import { 
+  MessageSquare, 
+  Share2, 
+  Coins, 
+  ArrowUpRight, 
+  Upload, 
+  Download, 
+  FileText, 
+  CheckCircle, 
+  Search, 
+  UserCheck, 
+  Heart, 
+  Sparkles, 
+  Filter, 
+  ChevronRight, 
+  ChevronDown,
+  ChevronUp,
+  DollarSign, 
+  Paperclip, 
+  Trash2, 
+  Image as ImageIcon, 
+  Sparkle, 
+  X,
+  Send,
+  CornerDownRight,
+  ShieldCheck,
+  Award,
+  CheckCircle2,
+  Clock
+} from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { safeStorage } from "../utils/safeStorage";
 
 // Interfaces
 interface AttachedFile {
@@ -10,9 +40,24 @@ interface AttachedFile {
   dataUrl: string;
 }
 
+export interface ForumComment {
+  id: string;
+  postId: string;
+  author: string;
+  authorRole: string;
+  content: string;
+  likes: number;
+  createdAt: string;
+  hasLiked?: boolean;
+  isDoctorVerified?: boolean;
+  isOwn?: boolean;
+  attachedFile?: AttachedFile | null;
+}
+
 interface ForumPost {
   id: string;
   author: string;
+  authorRole?: string;
   title: string;
   category: string;
   content: string;
@@ -36,11 +81,76 @@ interface SharedStudy {
   attachedFile?: AttachedFile | null;
 }
 
+const INITIAL_COMMENTS: Record<string, ForumComment[]> = {
+  "post-1": [
+    {
+      id: "comm-1-1",
+      postId: "post-1",
+      author: "Dr. Felipe Morales",
+      authorRole: "Implantólogo y Cirujano Bucal (UCh)",
+      content: "En mi experiencia en furcas Clase III mandibulares, el pronóstico a largo plazo mejora notablemente si se realiza ferulización semirrígida durante los primeros 4 meses de osteointegración de la matriz. Excelente abordaje con la membrana reabsorbible de colágeno.",
+      likes: 8,
+      createdAt: "Hace 1 hora",
+      hasLiked: false,
+      isDoctorVerified: true
+    },
+    {
+      id: "comm-1-2",
+      postId: "post-1",
+      author: "Dra. Marcela Garrido",
+      authorRole: "Periodoncista AAP & Docente",
+      content: "El CAL de 4mm a los 6 meses es un resultado formidable. ¿Realizaste control tomográfico CBCT de control para evaluar el llenado del defecto óseo interradicular antes de planificar la carga oclusal?",
+      likes: 6,
+      createdAt: "Hace 45 min",
+      hasLiked: false,
+      isDoctorVerified: true
+    }
+  ],
+  "post-2": [
+    {
+      id: "comm-2-1",
+      postId: "post-2",
+      author: "Dr. Ignacio León",
+      authorRole: "Periodoncista Clínico",
+      content: "El esquema de Van Winkelhoff (Amoxicilina 500mg + Metronidazol 250mg c/8h por 7-8 días) sigue mostrando la mayor efectividad clínica para el control de A. actinomycetemcomitans. Fundamental recalcar el control de placa domiciliario con cepillos interproximales cónicos calibrados.",
+      likes: 9,
+      createdAt: "Hace 3 horas",
+      hasLiked: false,
+      isDoctorVerified: true
+    },
+    {
+      id: "comm-2-2",
+      postId: "post-2",
+      author: "Dr. Rodrigo Alarcón",
+      authorRole: "Rehabilitador Oral",
+      content: "Excelente remisión de la inflamación gingival. Te sugiero mantener controles periodontales de soporte estrictos cada 3 meses durante el primer año post-terapia básica.",
+      likes: 4,
+      createdAt: "Hace 2 horas",
+      hasLiked: false,
+      isDoctorVerified: true
+    }
+  ],
+  "post-3": [
+    {
+      id: "comm-3-1",
+      postId: "post-3",
+      author: "Dra. Sofía Riquelme",
+      authorRole: "Odontopediatra & Preventiva",
+      content: "La clorhexidina en gel al 0.2% aplicada con micromotor o microbrush directamente en el surco reduce el índice gingival sin generar la pigmentación extrínseca masiva del colutorio diario. Muy buen aporte clínico.",
+      likes: 7,
+      createdAt: "Ayer a las 18:30",
+      hasLiked: false,
+      isDoctorVerified: true
+    }
+  ]
+};
+
 export default function DentalStories() {
   const [activeTab, setActiveTab] = useState<"foro" | "estudios">("foro");
   
   // Custom refs for file inputs
   const forumFileInputRef = useRef<HTMLInputElement>(null);
+  const commentFileInputRef = useRef<HTMLInputElement>(null);
   const studyFileInputRef = useRef<HTMLInputElement>(null);
 
   // Doctor Wallet State (using CLP values)
@@ -56,37 +166,80 @@ export default function DentalStories() {
     {
       id: "post-1",
       author: "Dr. Ignacio León",
+      authorRole: "Periodoncista Clínico",
       category: "Cirugía Periodontal",
       title: "Manejo reconstructivo de furca Clase III en pieza 36",
       content: "Se presenta caso de paciente fumador con compromiso de furca Severo Clase III en la pieza 36. Llevamos a cabo raspado de campo abierto combinado con injerto óseo desmineralizado y membrana reabsorbible de colágeno. En la revaluación a los 6 meses obtuvimos un CAL estable de 4mm. ¿Recomendarían ferulización preventiva o carga de implante?",
       likes: 24,
-      commentsCount: 12,
+      commentsCount: 2,
       createdAt: "Hace 2 horas",
       hasLiked: false
     },
     {
       id: "post-2",
       author: "Dra. Andrea Valenzuela",
+      authorRole: "Periodoncia e Implantología",
       category: "Casos Clínicos",
       title: "Asociación de periodontitis agresiva incipiente en paciente de 24 años",
       content: "Paciente joven acude con recesiones localizadas y sangrado marginal severo. Índice de O'Leary inicial de 68%. Iniciamos terapia higiénica estricta combinada con antibioterapia (Amoxicilina + Metronidazol) por 7 días. El retroceso en la inflamación fue del 90% en la semana 3. Adjunto periodontograma.",
       likes: 18,
-      commentsCount: 5,
+      commentsCount: 2,
       createdAt: "Hace 5 horas",
       hasLiked: false
     },
     {
       id: "post-3",
       author: "Dr. Carlos Soto",
+      authorRole: "Especialista en Microbiología Oral",
       category: "Microbiología",
       title: "Índice de O'Leary de 72% - Protocolo clínico inmediato",
-      content: "Reisados los índices de caries y placa, comparto mi protocolo de choque con clorhexidina en gel al 0.2% aplicado interproximal. Ideal para pacientes poco cooperadores con destreza motriz limitada.",
+      content: "Revisados los índices de caries y placa, comparto mi protocolo de choque con clorhexidina en gel al 0.2% aplicado interproximal. Ideal para pacientes poco cooperadores con destreza motriz limitada.",
       likes: 11,
-      commentsCount: 3,
+      commentsCount: 1,
       createdAt: "Ayer",
       hasLiked: false
     }
   ]);
+
+  // Comments state with safeStorage persistence
+  const [commentsMap, setCommentsMap] = useState<Record<string, ForumComment[]>>(() => {
+    try {
+      const saved = safeStorage.getItem("perio_forum_comments_v1");
+      if (saved) {
+        return { ...INITIAL_COMMENTS, ...JSON.parse(saved) };
+      }
+    } catch {}
+    return INITIAL_COMMENTS;
+  });
+
+  // Expanded comments accordion per post
+  const [expandedPosts, setExpandedPosts] = useState<Record<string, boolean>>({
+    "post-1": true // Post 1 expanded by default to showcase active comments
+  });
+
+  // Draft comment inputs per post
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+  const [commentDraftFiles, setCommentDraftFiles] = useState<Record<string, AttachedFile | null>>({});
+  const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null);
+
+  // Filter & Search state for forum
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("Todos");
+
+  // Save comments map changes to safeStorage
+  useEffect(() => {
+    try {
+      safeStorage.setItem("perio_forum_comments_v1", JSON.stringify(commentsMap));
+    } catch {}
+  }, [commentsMap]);
+
+  // Sync post comment counts with commentsMap
+  useEffect(() => {
+    setPosts(prev => prev.map(p => ({
+      ...p,
+      commentsCount: (commentsMap[p.id] || []).length
+    })));
+  }, [commentsMap]);
 
   // Studies marketplace state
   const [studies, setStudies] = useState<SharedStudy[]>([
@@ -207,6 +360,96 @@ export default function DentalStories() {
         return post;
       })
     );
+  };
+
+  const toggleExpandComments = (postId: string) => {
+    setExpandedPosts((prev) => ({
+      ...prev,
+      [postId]: !prev[postId],
+    }));
+  };
+
+  const handleAddComment = (postId: string, e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const text = commentDrafts[postId]?.trim();
+    if (!text) return;
+
+    const newComment: ForumComment = {
+      id: `comm-${Date.now()}`,
+      postId,
+      author: "Tú (Dr. Ignacio León)",
+      authorRole: "Periodoncista Clínico AAP",
+      content: text,
+      likes: 0,
+      createdAt: "Recién respondido",
+      hasLiked: false,
+      isDoctorVerified: true,
+      isOwn: true,
+      attachedFile: commentDraftFiles[postId] || null,
+    };
+
+    setCommentsMap((prev) => ({
+      ...prev,
+      [postId]: [...(prev[postId] || []), newComment],
+    }));
+
+    // Reset draft and draft file for this post
+    setCommentDrafts((prev) => ({ ...prev, [postId]: "" }));
+    setCommentDraftFiles((prev) => ({ ...prev, [postId]: null }));
+    
+    // Ensure the post is expanded
+    setExpandedPosts((prev) => ({ ...prev, [postId]: true }));
+  };
+
+  const handleLikeComment = (postId: string, commentId: string) => {
+    setCommentsMap((prev) => {
+      const list = prev[postId] || [];
+      const updated = list.map((c) => {
+        if (c.id === commentId) {
+          const isL = !c.hasLiked;
+          return {
+            ...c,
+            likes: isL ? c.likes + 1 : Math.max(0, c.likes - 1),
+            hasLiked: isL,
+          };
+        }
+        return c;
+      });
+      return { ...prev, [postId]: updated };
+    });
+  };
+
+  const handleDeleteComment = (postId: string, commentId: string) => {
+    setCommentsMap((prev) => {
+      const list = prev[postId] || [];
+      return {
+        ...prev,
+        [postId]: list.filter((c) => c.id !== commentId),
+      };
+    });
+  };
+
+  const handleCommentFileChange = (postId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setCommentDraftFiles((prev) => ({
+        ...prev,
+        [postId]: {
+          name: file.name,
+          size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
+          type: file.type,
+          dataUrl: event.target?.result as string,
+        },
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeCommentFile = (postId: string) => {
+    setCommentDraftFiles((prev) => ({ ...prev, [postId]: null }));
   };
 
   const handleCreatePost = (e: React.FormEvent) => {
@@ -365,11 +608,59 @@ export default function DentalStories() {
           {/* Main Feed (Post Feed) */}
           <div className="lg:col-span-2 space-y-4">
             
+            {/* Search & Category Filter Bar */}
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80 shadow-xs space-y-3">
+              <div className="flex flex-col sm:flex-row gap-2.5 items-center justify-between">
+                <div className="relative w-full sm:w-72">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Buscar casos, bioindicadores, furcas..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700/60 rounded-xl outline-none text-slate-800 dark:text-slate-200"
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-wrap w-full sm:w-auto">
+                  {["Todos", "Casos Clínicos", "Cirugía Periodontal", "Microbiología", "Docencia"].map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => setSelectedCategory(cat)}
+                      className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                        selectedCategory === cat
+                          ? "bg-teal-600 text-white shadow-xs"
+                          : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
             {/* Create Post Card */}
             <form onSubmit={handleCreatePost} className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 space-y-4 shadow-xs">
-              <span className="text-[10px] bg-teal-50 dark:bg-teal-800/40 text-teal-700 dark:text-teal-400 border border-teal-500/10 font-bold uppercase tracking-wider py-1 px-2 rounded-md">
-                Nueva Publicación en Comunidad
-              </span>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] bg-teal-50 dark:bg-teal-800/40 text-teal-700 dark:text-teal-400 border border-teal-500/10 font-bold uppercase tracking-wider py-1 px-2 rounded-md inline-flex items-center gap-1.5">
+                  <Sparkles className="w-3 h-3 text-teal-500" />
+                  <span>Nueva Publicación en Comunidad Médica</span>
+                </span>
+                <span className="text-[10px] text-slate-400 flex items-center gap-1 font-mono">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                  Anonimización HIPAA Activa
+                </span>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <input
                   type="text"
@@ -477,96 +768,341 @@ export default function DentalStories() {
 
             {/* Post Feed List */}
             <div className="space-y-4">
-              {posts.map((post) => (
-                <div key={post.id} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5 space-y-3.5 hover:shadow-xs transition-all relative">
-                  
-                  {/* Category, Author & Date Row */}
-                  <div className="flex justify-between items-center text-[10px] font-mono text-slate-400">
-                    <span className="font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400 bg-teal-50 dark:bg-teal-800/30 py-0.5 px-2 rounded">
-                      {post.category}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span>Ref: <strong>{post.author}</strong></span>
-                      <span>•</span>
-                      <span>{post.createdAt}</span>
-                    </div>
-                  </div>
+              {posts
+                .filter((p) => {
+                  const matchesCat = selectedCategory === "Todos" || p.category === selectedCategory || (selectedCategory.startsWith("#") && (p.title.includes(selectedCategory.substring(1)) || p.content.includes(selectedCategory.substring(1))));
+                  const matchesSearch = !searchQuery || p.title.toLowerCase().includes(searchQuery.toLowerCase()) || p.content.toLowerCase().includes(searchQuery.toLowerCase()) || p.author.toLowerCase().includes(searchQuery.toLowerCase());
+                  return matchesCat && matchesSearch;
+                })
+                .map((post) => {
+                  const postComments = commentsMap[post.id] || [];
+                  const isExpanded = expandedPosts[post.id] ?? false;
+                  const draftText = commentDrafts[post.id] || "";
+                  const draftFile = commentDraftFiles[post.id] || null;
 
-                  {/* Title & Content */}
-                  <div className="space-y-1.5">
-                    <h3 className="text-sm font-semibold text-slate-800 dark:text-white leading-snug">
-                      {post.title}
-                    </h3>
-                    <p className="text-xs text-slate-500 dark:text-slate-300 leading-relaxed font-light">
-                      {post.content}
-                    </p>
+                  return (
+                    <div key={post.id} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5 space-y-4 hover:shadow-xs transition-all relative">
+                      
+                      {/* Category, Author & Date Row */}
+                      <div className="flex justify-between items-center text-[10px] font-mono text-slate-400">
+                        <span className="font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400 bg-teal-50 dark:bg-teal-800/30 py-0.5 px-2 rounded">
+                          {post.category}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="flex items-center gap-1">
+                            <span className="font-bold text-slate-700 dark:text-slate-300">{post.author}</span>
+                            {post.authorRole && (
+                              <span className="text-[9px] text-teal-600 dark:text-teal-400">({post.authorRole})</span>
+                            )}
+                          </span>
+                          <span>•</span>
+                          <span>{post.createdAt}</span>
+                        </div>
+                      </div>
 
-                    {/* Attached file output for the post */}
-                    {post.attachedFile && (
-                      <div className="mt-3.5 overflow-hidden rounded-xl border border-slate-100 dark:border-slate-800/80 bg-slate-50/40 dark:bg-slate-950/15">
-                        {post.attachedFile.type.startsWith("image/") ? (
-                          <div className="relative group max-h-80 overflow-hidden bg-black/5 flex items-center justify-center">
-                            <img 
-                              src={post.attachedFile.dataUrl} 
-                              className="w-full max-h-80 object-contain hover:scale-[1.01] transition-transform duration-300" 
-                              alt={post.attachedFile.name} 
-                            />
-                            <a 
-                              href={post.attachedFile.dataUrl} 
-                              download={post.attachedFile.name}
-                              className="absolute top-2.5 right-2.5 bg-black/70 hover:bg-teal-600 text-white p-2 rounded-xl border border-white/10 backdrop-blur-md transition-all scale-95 opacity-80 group-hover:opacity-100 flex items-center gap-1.5 text-[10px] font-bold"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                              Guardar Foto
-                            </a>
-                          </div>
-                        ) : (
-                          <div className="p-3 flex items-center justify-between gap-4">
-                            <div className="flex items-center gap-2.5 truncate">
-                              <div className="p-2 bg-teal-500/10 border border-teal-500/20 text-teal-600 dark:text-teal-400 rounded-xl shrink-0">
-                                <FileText className="w-5 h-5" />
+                      {/* Title & Content */}
+                      <div className="space-y-1.5">
+                        <h3 className="text-sm font-semibold text-slate-800 dark:text-white leading-snug">
+                          {post.title}
+                        </h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-300 leading-relaxed font-light whitespace-pre-line">
+                          {post.content}
+                        </p>
+
+                        {/* Attached file output for the post */}
+                        {post.attachedFile && (
+                          <div className="mt-3.5 overflow-hidden rounded-xl border border-slate-100 dark:border-slate-800/80 bg-slate-50/40 dark:bg-slate-950/15">
+                            {post.attachedFile.type.startsWith("image/") ? (
+                              <div className="relative group max-h-80 overflow-hidden bg-black/5 flex items-center justify-center">
+                                <img 
+                                  src={post.attachedFile.dataUrl} 
+                                  className="w-full max-h-80 object-contain hover:scale-[1.01] transition-transform duration-300" 
+                                  alt={post.attachedFile.name} 
+                                />
+                                <a 
+                                  href={post.attachedFile.dataUrl} 
+                                  download={post.attachedFile.name}
+                                  className="absolute top-2.5 right-2.5 bg-black/70 hover:bg-teal-600 text-white p-2 rounded-xl border border-white/10 backdrop-blur-md transition-all scale-95 opacity-80 group-hover:opacity-100 flex items-center gap-1.5 text-[10px] font-bold"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                  Guardar Foto
+                                </a>
                               </div>
-                              <div className="truncate">
-                                <p className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{post.attachedFile.name}</p>
-                                <p className="text-[10px] text-slate-400 font-mono">{post.attachedFile.size} • Adjunto Clínico</p>
+                            ) : (
+                              <div className="p-3 flex items-center justify-between gap-4">
+                                <div className="flex items-center gap-2.5 truncate">
+                                  <div className="p-2 bg-teal-500/10 border border-teal-500/20 text-teal-600 dark:text-teal-400 rounded-xl shrink-0">
+                                    <FileText className="w-5 h-5" />
+                                  </div>
+                                  <div className="truncate">
+                                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{post.attachedFile.name}</p>
+                                    <p className="text-[10px] text-slate-400 font-mono">{post.attachedFile.size} • Adjunto Clínico</p>
+                                  </div>
+                                </div>
+                                <a
+                                  href={post.attachedFile.dataUrl}
+                                  download={post.attachedFile.name}
+                                  className="flex items-center gap-1 py-1.5 px-3 bg-teal-50 hover:bg-teal-100 dark:bg-teal-900/30 dark:hover:bg-teal-900/60 border border-teal-500/20 text-teal-700 dark:text-teal-400 text-[10px] font-black uppercase rounded-lg transition-all"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                  Bajar
+                                </a>
                               </div>
-                            </div>
-                            <a
-                              href={post.attachedFile.dataUrl}
-                              download={post.attachedFile.name}
-                              className="flex items-center gap-1 py-1.5 px-3 bg-teal-50 hover:bg-teal-100 dark:bg-teal-900/30 dark:hover:bg-teal-900/60 border border-teal-500/20 text-teal-700 dark:text-teal-400 text-[10px] font-black uppercase rounded-lg transition-all"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                              Bajar
-                            </a>
+                            )}
                           </div>
                         )}
                       </div>
-                    )}
-                  </div>
 
-                  {/* Likes and comments footer */}
-                  <div className="flex items-center gap-4 border-t border-slate-50 dark:border-slate-800/60 pt-3.5">
-                    <button
-                      onClick={() => handleLikePost(post.id)}
-                      className={`text-[11px] font-bold py-1 px-2.5 rounded-lg border transition-all cursor-pointer inline-flex items-center gap-1.5 ${
-                        post.hasLiked
-                          ? "bg-red-50 text-red-500 border-red-200"
-                          : "bg-slate-50 dark:bg-slate-800 text-slate-400 border-transparent hover:text-red-500 hover:bg-slate-100"
-                      }`}
-                    >
-                      <Heart className={`w-3.5 h-3.5 ${post.hasLiked ? "fill-red-505" : ""}`} />
-                      <span>{post.likes} Doctor{post.likes !== 1 ? 's' : ''}</span>
-                    </button>
+                      {/* Likes and comments toggle footer */}
+                      <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-800/80 pt-3">
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => handleLikePost(post.id)}
+                            className={`text-[11px] font-bold py-1 px-2.5 rounded-lg border transition-all cursor-pointer inline-flex items-center gap-1.5 ${
+                              post.hasLiked
+                                ? "bg-red-50 dark:bg-red-950/30 text-red-500 border-red-200 dark:border-red-800"
+                                : "bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-transparent hover:text-red-500 hover:bg-slate-100 dark:hover:bg-slate-750"
+                            }`}
+                          >
+                            <Heart className={`w-3.5 h-3.5 ${post.hasLiked ? "fill-red-500" : ""}`} />
+                            <span>{post.likes} Doctor{post.likes !== 1 ? 'es' : ''}</span>
+                          </button>
 
-                    <span className="text-[11px] text-slate-400 inline-flex items-center gap-1.5">
-                      <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{post.commentsCount} respuestas médicas</span>
-                    </span>
-                  </div>
+                          <button
+                            type="button"
+                            onClick={() => toggleExpandComments(post.id)}
+                            className={`text-[11px] font-bold py-1 px-3 rounded-lg border transition-all cursor-pointer inline-flex items-center gap-1.5 ${
+                              isExpanded
+                                ? "bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800"
+                                : "bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-transparent hover:bg-teal-50 dark:hover:bg-teal-950/20 hover:text-teal-600"
+                            }`}
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            <span>{postComments.length} {postComments.length === 1 ? "Respuesta Médica" : "Respuestas Médicas"}</span>
+                            {isExpanded ? (
+                              <ChevronUp className="w-3 h-3 ml-0.5 text-teal-600 dark:text-teal-400" />
+                            ) : (
+                              <ChevronDown className="w-3 h-3 ml-0.5 text-slate-400" />
+                            )}
+                          </button>
+                        </div>
 
-                </div>
-              ))}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!isExpanded) toggleExpandComments(post.id);
+                            // Focus comment input
+                            const el = document.getElementById(`comment-input-${post.id}`);
+                            if (el) el.focus();
+                          }}
+                          className="text-[11px] text-teal-600 dark:text-teal-400 hover:underline font-semibold flex items-center gap-1 cursor-pointer"
+                        >
+                          <CornerDownRight className="w-3 h-3" />
+                          <span>Responder caso</span>
+                        </button>
+                      </div>
+
+                      {/* EXPANDABLE COMMENTS THREAD */}
+                      <AnimatePresence>
+                        {isExpanded && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800 overflow-hidden"
+                          >
+                            <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400 px-1">
+                              <span className="flex items-center gap-1.5">
+                                <MessageSquare className="w-3.5 h-3.5 text-teal-500" />
+                                Discusión Clínica y Evidencia ({postComments.length})
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-normal">
+                                Visibilidad exclusiva para odontólogos colegiados
+                              </span>
+                            </div>
+
+                            {/* List of existing comments */}
+                            <div className="space-y-2.5">
+                              {postComments.length === 0 ? (
+                                <div className="p-4 bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-xs text-slate-400">
+                                  Aún no hay respuestas en este caso. ¡Sé el primer especialista en opinar!
+                                </div>
+                              ) : (
+                                postComments.map((comment) => (
+                                  <div
+                                    key={comment.id}
+                                    className="p-3.5 bg-slate-50/80 dark:bg-slate-950/60 rounded-xl border border-slate-100 dark:border-slate-800 space-y-2 relative group/comm"
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-6 h-6 rounded-full bg-teal-600/10 dark:bg-teal-400/20 text-teal-600 dark:text-teal-300 font-bold text-[10px] flex items-center justify-center border border-teal-500/20">
+                                          {comment.author.charAt(0)}
+                                        </div>
+                                        <div>
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                                              {comment.author}
+                                            </span>
+                                            {comment.isDoctorVerified && (
+                                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" title="Especialista Certificado">
+                                                <CheckCircle2 className="w-2.5 h-2.5" />
+                                                Verificado
+                                              </span>
+                                            )}
+                                          </div>
+                                          <span className="text-[10px] text-slate-400 block -mt-0.5">
+                                            {comment.authorRole}
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
+                                          <Clock className="w-3 h-3 text-slate-400" />
+                                          {comment.createdAt}
+                                        </span>
+                                        {comment.isOwn && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDeleteComment(post.id, comment.id)}
+                                            className="opacity-0 group-hover/comm:opacity-100 p-1 text-slate-400 hover:text-red-500 rounded transition-all cursor-pointer"
+                                            title="Eliminar mi respuesta"
+                                          >
+                                            <Trash2 className="w-3 h-3" />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-light pl-8 whitespace-pre-line">
+                                      {comment.content}
+                                    </p>
+
+                                    {/* Comment attached file */}
+                                    {comment.attachedFile && (
+                                      <div className="pl-8 pt-1">
+                                        {comment.attachedFile.type.startsWith("image/") ? (
+                                          <div className="max-w-xs rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800">
+                                            <img src={comment.attachedFile.dataUrl} alt={comment.attachedFile.name} className="w-full max-h-48 object-cover" />
+                                          </div>
+                                        ) : (
+                                          <a
+                                            href={comment.attachedFile.dataUrl}
+                                            download={comment.attachedFile.name}
+                                            className="inline-flex items-center gap-2 p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 text-[10px] font-bold text-teal-600 hover:underline"
+                                          >
+                                            <FileText className="w-3.5 h-3.5" />
+                                            <span>{comment.attachedFile.name} ({comment.attachedFile.size})</span>
+                                          </a>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {/* Like comment button */}
+                                    <div className="pl-8 pt-1 flex items-center gap-3">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleLikeComment(post.id, comment.id)}
+                                        className={`text-[10px] font-bold py-0.5 px-2 rounded-md border transition-all cursor-pointer inline-flex items-center gap-1 ${
+                                          comment.hasLiked
+                                            ? "bg-red-50 dark:bg-red-950/30 text-red-500 border-red-200 dark:border-red-800"
+                                            : "bg-white dark:bg-slate-900 text-slate-400 border-slate-200 dark:border-slate-800 hover:text-red-500"
+                                        }`}
+                                      >
+                                        <Heart className={`w-3 h-3 ${comment.hasLiked ? "fill-red-500" : ""}`} />
+                                        <span>{comment.likes}</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+
+                            {/* Active Comment Input Form */}
+                            <form
+                              onSubmit={(e) => handleAddComment(post.id, e)}
+                              className="p-3 bg-white dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2 shadow-xs"
+                            >
+                              <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                                <span className="flex items-center gap-1.5">
+                                  <div className="w-2 h-2 rounded-full bg-teal-500 animate-pulse" />
+                                  Aportar criterio clínico como Dr. Ignacio León
+                                </span>
+                                <span className="text-[10px] text-slate-400">Ctrl + Enter para enviar</span>
+                              </div>
+
+                              <textarea
+                                id={`comment-input-${post.id}`}
+                                rows={2}
+                                placeholder="Escribe tu observación periodontal, sugerencia de colgajo, medicación, bibliografía o criterio terapéutico..."
+                                value={draftText}
+                                onChange={(e) => setCommentDrafts((prev) => ({ ...prev, [post.id]: e.target.value }))}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                                    e.preventDefault();
+                                    handleAddComment(post.id);
+                                  }
+                                }}
+                                className="w-full p-2.5 text-xs bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-teal-500/20 text-slate-800 dark:text-slate-100 resize-y"
+                              />
+
+                              {/* Attachment preview in draft */}
+                              {draftFile && (
+                                <div className="flex items-center justify-between p-2 bg-teal-500/10 border border-teal-500/20 rounded-lg text-xs">
+                                  <span className="truncate max-w-xs text-slate-700 dark:text-slate-200 font-bold text-[11px]">
+                                    📎 {draftFile.name} ({draftFile.size})
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeCommentFile(post.id)}
+                                    className="text-slate-400 hover:text-red-500 p-1"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              )}
+
+                              <div className="flex items-center justify-between pt-1">
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="file"
+                                    id={`file-input-${post.id}`}
+                                    onChange={(e) => handleCommentFileChange(post.id, e)}
+                                    accept="image/*,.pdf,.doc,.docx"
+                                    className="hidden"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const el = document.getElementById(`file-input-${post.id}`);
+                                      if (el) el.click();
+                                    }}
+                                    className="px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-[11px] font-semibold transition-all flex items-center gap-1.5 cursor-pointer"
+                                  >
+                                    <Paperclip className="w-3 h-3" />
+                                    <span>Adjuntar Rx/Foto</span>
+                                  </button>
+                                </div>
+
+                                <button
+                                  type="submit"
+                                  disabled={!draftText.trim()}
+                                  className="px-3.5 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                                >
+                                  <Send className="w-3 h-3" />
+                                  <span>Publicar Respuesta</span>
+                                </button>
+                              </div>
+                            </form>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                    </div>
+                  );
+                })}
             </div>
 
           </div>
@@ -594,7 +1130,17 @@ export default function DentalStories() {
                   { tag: "Injerción de Tejido Conectivo", count: 32 },
                   { tag: "Biochips y Diagnóstico Genético", count: 14 }
                 ].map((ch) => (
-                  <div key={ch.tag} className="flex justify-between items-center p-2.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer">
+                  <div 
+                    key={ch.tag} 
+                    onClick={() => {
+                      setSelectedCategory(selectedCategory === `#${ch.tag}` ? "Todos" : `#${ch.tag}`);
+                    }}
+                    className={`flex justify-between items-center p-2.5 rounded-xl transition-colors cursor-pointer ${
+                      selectedCategory === `#${ch.tag}`
+                        ? "bg-teal-600/10 border border-teal-500/30 text-teal-600 dark:text-teal-400"
+                        : "bg-slate-50 dark:bg-slate-800/40 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    }`}
+                  >
                     <span className="font-semibold text-slate-800 dark:text-slate-200">#{ch.tag}</span>
                     <span className="font-mono text-[10px] text-slate-400 font-bold bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">{ch.count}</span>
                   </div>

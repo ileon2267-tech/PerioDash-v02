@@ -20,7 +20,9 @@ import {
   Settings,
   Mic,
   MicOff,
-  History
+  History,
+  Stethoscope,
+  Camera
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { recordHipaaAudit } from "../utils/hipaaAudit";
@@ -139,9 +141,11 @@ interface PeriodontogramaProps {
   odontogram?: Record<number, ToothState>;
   patient?: Patient | null;
   onUpdatePatient?: (updatedPatient: Patient) => void;
+  onOpenChairMode?: () => void;
+  onNavigateToPsr?: () => void;
 }
 
-function PeriodontogramaComponent({ periodontogram, onChange, odontogram, patient, onUpdatePatient }: PeriodontogramaProps) {
+function PeriodontogramaComponent({ periodontogram, onChange, odontogram, patient, onUpdatePatient, onOpenChairMode, onNavigateToPsr }: PeriodontogramaProps) {
   const [selectedTooth, setSelectedTooth] = useState<number>(16);
   const [activeArch, setActiveArch] = useState<"upper" | "lower">("upper");
 
@@ -185,7 +189,8 @@ function PeriodontogramaComponent({ periodontogram, onChange, odontogram, patien
   // Voice assistant clinical mode states
   const [voiceChartingMode, setVoiceChartingMode] = useState<boolean>(false);
   const [voiceTranscript, setVoiceTranscript] = useState<string>("");
-  const [recognitionInstance, setRecognitionInstance] = useState<any>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const recognitionRef = React.useRef<any>(null);
 
   const voiceStateRef = React.useRef({
     selectedTooth,
@@ -206,131 +211,6 @@ function PeriodontogramaComponent({ periodontogram, onChange, odontogram, patien
       teethList,
     };
   }, [selectedTooth, inputMetric, inputSurface, inputPosition, periodontogram, teethList]);
-
-  useEffect(() => {
-    if (voiceChartingMode) {
-      if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-        alert("Tu navegador no soporta reconocimiento de voz nativo.");
-        setVoiceChartingMode(false);
-        return;
-      }
-      const SpeechRecognitionConstructor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      const recognition = new SpeechRecognitionConstructor();
-      recognition.continuous = true;
-      recognition.interimResults = false;
-      recognition.lang = 'es-CL';
-
-      recognition.onresult = (event: any) => {
-        const current = event.resultIndex;
-        const transcript = event.results[current][0].transcript.toLowerCase();
-        setVoiceTranscript(transcript);
-        
-        // Simple NLP parser for: "pieza [num] vestibular bolsa [num] [num] [num]"
-        const words = transcript.split(/\s+/);
-        
-        let newNum = voiceStateRef.current.selectedTooth;
-        let surface = voiceStateRef.current.inputSurface;
-        let metric = voiceStateRef.current.inputMetric;
-
-        // Parse tooth
-        const piezaIdx = words.indexOf('pieza');
-        if (piezaIdx !== -1 && words[piezaIdx + 1]) {
-          const parsedNum = parseInt(words[piezaIdx + 1]);
-          if (!isNaN(parsedNum) && voiceStateRef.current.teethList.includes(parsedNum)) {
-            newNum = parsedNum;
-            setSelectedTooth(newNum);
-          }
-        } else {
-          // just numbers fallback
-          const possibleNums = words.map((w: string) => parseInt(w)).filter((n: number) => !isNaN(n) && voiceStateRef.current.teethList.includes(n));
-          if (possibleNums.length > 0) {
-             newNum = possibleNums[0];
-             setSelectedTooth(newNum);
-          }
-        }
-
-        // Parse surface
-        if (transcript.includes('vestibular')) {
-           surface = "vestibular";
-           setInputSurface("vestibular");
-        } else if (transcript.includes('palatino') || transcript.includes('lingual')) {
-           surface = "palatino";
-           setInputSurface("palatino");
-        }
-
-        // Parse metric
-        if (transcript.includes('bolsa') || transcript.includes('sondaje')) {
-          metric = "pocket";
-          setInputMetric("pocket");
-        } else if (transcript.includes('recesión') || transcript.includes('margen')) {
-          metric = "recess";
-          setInputMetric("recess");
-        }
-
-        // Extract values (looking for sequence of 3 digits e.g. "4 5 4" or "2 1 2")
-        const numberMatches = transcript.match(/\b\d\b/g); // Find single digits
-        if (numberMatches && numberMatches.length >= 3) {
-          // get the last 3 digits spoken
-          const last3 = numberMatches.slice(-3).map(Number);
-          
-          const currentToothData: PeriodonState = voiceStateRef.current.periodontogram[newNum] || {
-            toothNumber: newNum,
-            vestibularPocket: { mesial: 2, central: 1, distal: 2 },
-            palatinoPocket: { mesial: 2, central: 1, distal: 2 },
-            vestibularRecess: { mesial: 0, central: 0, distal: 0 },
-            palatinoRecess: { mesial: 0, central: 0, distal: 0 },
-            sangradoVestibular: { mesial: false, central: false, distal: false },
-            sangradoPalatino: { mesial: false, central: false, distal: false },
-            supuracionVestibular: { mesial: false, central: false, distal: false },
-            supuracionPalatino: { mesial: false, central: false, distal: false },
-            placaVestibular: { mesial: false, central: false, distal: false },
-            placaPalatino: { mesial: false, central: false, distal: false },
-            movilidad: 0,
-            furca: 0
-          };
-
-          const key = surface === "vestibular" 
-            ? (metric === "pocket" ? "vestibularPocket" : "vestibularRecess")
-            : (metric === "pocket" ? "palatinoPocket" : "palatinoRecess");
-
-          const updated = {
-            ...voiceStateRef.current.periodontogram,
-            [newNum]: {
-              ...currentToothData,
-              [key]: {
-                mesial: last3[0],
-                central: last3[1],
-                distal: last3[2]
-              }
-            }
-          };
-
-          onChange(updated);
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        console.error("Voice Recognition Error:", event.error);
-        if (event.error !== 'no-speech') {
-          setVoiceChartingMode(false);
-        }
-      };
-
-      recognition.start();
-      setRecognitionInstance(recognition);
-    } else {
-      if (recognitionInstance) {
-        recognitionInstance.stop();
-        setRecognitionInstance(null);
-      }
-    }
-
-    return () => {
-      if (recognitionInstance) {
-        recognitionInstance.stop();
-      }
-    };
-  }, [voiceChartingMode]);
 
   // Prognosis and Lang & Tonetti Risk parameters (synced back to patient or internal state fallbacks)
   const [internalSmoking, setInternalSmoking] = useState<number>(0);
@@ -513,6 +393,56 @@ function PeriodontogramaComponent({ periodontogram, onChange, odontogram, patien
     ? "MODERADO" 
     : "BAJO";
 
+  const handlePocketChange = (
+    toothNum: number,
+    surface: "vestibularPocket" | "palatinoPocket" | "vestibularRecess" | "palatinoRecess",
+    position: "mesial" | "central" | "distal",
+    val: number
+  ) => {
+    const updated = { ...periodontogram };
+    const tooth = { ...updated[toothNum] };
+    
+    // Copy inner state
+    const values = { ...tooth[surface] } as any;
+    values[position] = Math.max(0, val);
+    tooth[surface] = values;
+    
+    updated[toothNum] = tooth;
+    onChange(updated);
+  };
+
+  const handleToggleFlag = (
+    toothNum: number,
+    surface: "sangradoVestibular" | "sangradoPalatino" | "placaVestibular" | "placaPalatino",
+    position: "mesial" | "central" | "distal"
+  ) => {
+    const updated = { ...periodontogram };
+    const tooth = { ...updated[toothNum] };
+    
+    const flags = { ...tooth[surface] } as any;
+    flags[position] = !flags[position];
+    tooth[surface] = flags;
+    
+    updated[toothNum] = tooth;
+    onChange(updated);
+  };
+
+  const handleToggleSupuracion = (
+    toothNum: number,
+    surface: "supuracionVestibular" | "supuracionPalatino",
+    position: "mesial" | "central" | "distal"
+  ) => {
+    const updated = { ...periodontogram };
+    const tooth = { ...updated[toothNum] };
+    
+    const flags = { ...tooth[surface] } as any;
+    flags[position] = !flags[position];
+    tooth[surface] = flags;
+    
+    updated[toothNum] = tooth;
+    onChange(updated);
+  };
+
   // Global keydown triggers when rapid entry keyboard mode is active
   useEffect(() => {
     if (!keyboardMode) return;
@@ -593,16 +523,17 @@ function PeriodontogramaComponent({ periodontogram, onChange, odontogram, patien
         handleToggleFlag(selectedTooth, flagSurface, inputPosition);
         return;
       }
-      if (key === "p" || key === "l") {
-        e.preventDefault();
-        const flagSurface = inputSurface === "vestibular" ? "placaVestibular" : "placaPalatino";
-        handleToggleFlag(selectedTooth, flagSurface, inputPosition);
-        return;
-      }
-      if (key === "u" || key === "d") {
+      if (key === "u" || key === "d" || key === "p") {
         e.preventDefault();
         const flagSurface = inputSurface === "vestibular" ? "supuracionVestibular" : "supuracionPalatino";
         handleToggleSupuracion(selectedTooth, flagSurface, inputPosition);
+        return;
+      }
+      if (key === "f") {
+        e.preventDefault();
+        const currentGrade = periodontogram[selectedTooth]?.furca || 0;
+        const nextGrade = ((currentGrade + 1) % 4) as 0 | 1 | 2 | 3;
+        handleNumberFlag(selectedTooth, "furca", nextGrade);
         return;
       }
     };
@@ -614,7 +545,7 @@ function PeriodontogramaComponent({ periodontogram, onChange, odontogram, patien
   }, [keyboardMode, selectedTooth, inputMetric, inputSurface, inputPosition, periodontogram, teethList]);
 
   // Voice command parsing logic for hands-free clinical input
-  const parseVoiceCommand = (rawText: string) => {
+  const parseVoiceCommand = (rawText: string): boolean => {
     const text = rawText.toLowerCase().trim();
     setVoiceTranscript(rawText);
 
@@ -626,66 +557,137 @@ function PeriodontogramaComponent({ periodontogram, onChange, odontogram, patien
       teethList: refList,
     } = voiceStateRef.current;
 
-    // 1. Navigation & State changes first
+    // Jump to Modo Sillón hands-free
+    if (
+      text.includes("modo sillon") ||
+      text.includes("modo sillón") ||
+      text.includes("abrir sillon") ||
+      text.includes("activar sillon") ||
+      text.includes("entrar a modo sillon") ||
+      text.includes("sillon clinico") ||
+      text === "sillon" ||
+      text === "sillón"
+    ) {
+      if (onOpenChairMode) {
+        onOpenChairMode();
+      } else {
+        window.dispatchEvent(new CustomEvent('periodash-open-chair-mode'));
+      }
+      return true;
+    }
+
+    // 0. Jump to tooth directly: "pieza 16", "diente 24", or FDI code
+    const toothMatch = text.match(/(?:pieza|diente|fdi)\s*(\d{2})/);
+    if (toothMatch && toothMatch[1]) {
+      const parsedNum = parseInt(toothMatch[1], 10);
+      if (refList.includes(parsedNum)) {
+        setSelectedTooth(parsedNum);
+        return true;
+      }
+    }
+
+    // 1. Navigation & State changes
     if (text.includes("siguiente") || text.includes("avanzar")) {
       const idx = refList.indexOf(refSelected);
       const nextIdx = (idx + 1) % refList.length;
       setSelectedTooth(refList[nextIdx]);
-      return;
+      return true;
     }
     if (text.includes("atrás") || text.includes("anterior") || text.includes("regresar") || text.includes("atras")) {
       const idx = refList.indexOf(refSelected);
       const prevIdx = idx > 0 ? idx - 1 : refList.length - 1;
       setSelectedTooth(refList[prevIdx]);
-      return;
+      return true;
     }
     if (text.includes("vestibular") || text.includes("exterior") || text.includes("afuera")) {
       setInputSurface("vestibular");
-      return;
+      return true;
     }
     if (text.includes("palatino") || text.includes("lingual") || text.includes("interior") || text.includes("adentro")) {
       setInputSurface("palatino");
-      return;
+      return true;
     }
     if (text.includes("mesial")) {
       setInputPosition("mesial");
-      return;
+      return true;
     }
     if (text.includes("central") || text.includes("medio")) {
       setInputPosition("central");
-      return;
+      return true;
     }
     if (text.includes("distal")) {
       setInputPosition("distal");
-      return;
+      return true;
     }
     if (text.includes("sondaje") || text.includes("profundidad") || text.includes("bolsa")) {
       setInputMetric("pocket");
-      return;
+      return true;
     }
     if (text.includes("recesión") || text.includes("recesion") || text.includes("receso")) {
       setInputMetric("recess");
-      return;
+      return true;
     }
 
     // 2. Flags toggles
     if (text.includes("sangrado") || text.includes("sangra") || text.includes("bop") || text.includes("sangrar")) {
       const flagSurface = refSurface === "vestibular" ? "sangradoVestibular" : "sangradoPalatino";
       handleToggleFlag(refSelected, flagSurface, refPosition);
-      return;
+      return true;
     }
     if (text.includes("placa") || text.includes("bacterias") || text.includes("sarro")) {
       const flagSurface = refSurface === "vestibular" ? "placaVestibular" : "placaPalatino";
       handleToggleFlag(refSelected, flagSurface, refPosition);
-      return;
+      return true;
     }
-    if (text.includes("supuración") || text.includes("supuracion") || text.includes("pus") || text.includes("supura")) {
+    if (text.includes("supuración") || text.includes("supuracion") || text.includes("pus") || text.includes("supura") || text.includes("exudado")) {
       const flagSurface = refSurface === "vestibular" ? "supuracionVestibular" : "supuracionPalatino";
       handleToggleSupuracion(refSelected, flagSurface, refPosition);
-      return;
+      return true;
+    }
+    if (text.includes("furca") || text.includes("furcación") || text.includes("furcacion")) {
+      const matchGrade = text.match(/furca\s*(?:grado\s*|clase\s*)?([0-3]|uno|dos|tres|cero)/i);
+      let grade: 0 | 1 | 2 | 3 = 1;
+      if (matchGrade && matchGrade[1]) {
+        const raw = matchGrade[1].toLowerCase();
+        if (raw === "0" || raw === "cero") grade = 0;
+        else if (raw === "1" || raw === "uno") grade = 1;
+        else if (raw === "2" || raw === "dos") grade = 2;
+        else if (raw === "3" || raw === "tres") grade = 3;
+      } else {
+        const curr = periodontogram[refSelected]?.furca || 0;
+        grade = ((curr + 1) % 4) as 0 | 1 | 2 | 3;
+      }
+      handleNumberFlag(refSelected, "furca", grade);
+      return true;
     }
 
-    // 3. Number Parsing for pocket/recess values
+    // 3. Multi-number sequence (e.g. "4 3 2" or sequence of 3 digits)
+    const numberMatches = text.match(/\b\d+\b/g);
+    if (numberMatches && numberMatches.length >= 3) {
+      const last3 = numberMatches.slice(-3).map(Number);
+      const targetField = refSurface === "vestibular"
+        ? (refMetric === "pocket" ? "vestibularPocket" : "vestibularRecess")
+        : (refMetric === "pocket" ? "palatinoPocket" : "palatinoRecess");
+
+      handlePocketChange(refSelected, targetField, "mesial", last3[0]);
+      handlePocketChange(refSelected, targetField, "central", last3[1]);
+      handlePocketChange(refSelected, targetField, "distal", last3[2]);
+
+      // Distal completed, advance face or next tooth
+      if (refSurface === "vestibular") {
+        setInputSurface("palatino");
+        setInputPosition("mesial");
+      } else {
+        const idx = refList.indexOf(refSelected);
+        const nextIdx = (idx + 1) % refList.length;
+        setSelectedTooth(refList[nextIdx]);
+        setInputSurface("vestibular");
+        setInputPosition("mesial");
+      }
+      return true;
+    }
+
+    // 4. Single number Parsing for pocket/recess values
     let val: number | null = null;
     if (text.includes("cero") || text === "0" || text.includes("nulo")) val = 0;
     else if (text.includes("uno") || text.includes("una") || text === "1") val = 1;
@@ -731,115 +733,150 @@ function PeriodontogramaComponent({ periodontogram, onChange, odontogram, patien
           setInputPosition("mesial");
         }
       }
+      return true;
     }
+
+    return false;
   };
 
   useEffect(() => {
     if (!voiceChartingMode) {
-      if (recognitionInstance) {
+      if (recognitionRef.current) {
         try {
-          recognitionInstance.stop();
-        } catch (e) {}
+          recognitionRef.current.stop();
+        } catch {
+          // safe teardown
+        }
+        recognitionRef.current = null;
       }
       return;
     }
 
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("La API de reconocimiento de voz no está soportada en este navegador. Por favor usa Google Chrome.");
+    setVoiceError(null);
+
+    const SpeechRecognitionClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionClass) {
+      setVoiceError("Tu navegador no soporta reconocimiento de voz nativo. Por favor usa Google Chrome o Microsoft Edge.");
       setVoiceChartingMode(false);
       return;
     }
 
-    const rec = new SpeechRecognition();
-    rec.lang = "es-ES";
-    rec.interimResults = false;
+    let isTerminated = false;
+    let rec: any = null;
+    const handledIndices = new Set<number>();
+
+    try {
+      rec = new SpeechRecognitionClass();
+    } catch {
+      setVoiceError("No se pudo iniciar el servicio de reconocimiento de voz.");
+      setVoiceChartingMode(false);
+      return;
+    }
+
+    rec.lang = typeof navigator !== "undefined" && navigator.language?.startsWith("es")
+      ? navigator.language
+      : "es-ES";
+    rec.interimResults = true;
     rec.continuous = true;
 
     rec.onresult = (event: any) => {
-      const lastResultIndex = event.results.length - 1;
-      const transcript = event.results[lastResultIndex][0].transcript;
-      parseVoiceCommand(transcript);
+      try {
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const res = event.results[i];
+          const transcript = res[0]?.transcript;
+          if (!transcript) continue;
+
+          if (handledIndices.has(i)) {
+            continue;
+          }
+
+          if (!res.isFinal) {
+            const didExecute = parseVoiceCommand(transcript);
+            if (didExecute) {
+              handledIndices.add(i);
+            }
+          } else {
+            if (!handledIndices.has(i)) {
+              handledIndices.add(i);
+              parseVoiceCommand(transcript);
+            }
+          }
+        }
+        if (handledIndices.size > 50) {
+          handledIndices.clear();
+        }
+      } catch {
+        // Safe capture
+      }
     };
 
     rec.onerror = (e: any) => {
-      console.error("Speech recognition error", e);
+      const errorType = e?.error || 'unknown';
+
+      // Benign event in standard speech recognition (silence or stopped)
+      if (errorType === 'no-speech' || errorType === 'aborted') {
+        return;
+      }
+
+      // Permission or hardware errors
+      if (errorType === 'not-allowed' || errorType === 'service-not-allowed') {
+        isTerminated = true;
+        setVoiceError("Acceso al micrófono denegado. Permite el micrófono en los ajustes de tu navegador.");
+        setVoiceChartingMode(false);
+        return;
+      }
+
+      if (errorType === 'audio-capture') {
+        isTerminated = true;
+        setVoiceError("No se detectó un micrófono disponible en tu dispositivo.");
+        setVoiceChartingMode(false);
+        return;
+      }
+
+      if (errorType === 'network') {
+        isTerminated = true;
+        setVoiceError("Error de conexión con el servicio de reconocimiento de voz.");
+        setVoiceChartingMode(false);
+        return;
+      }
+
+      isTerminated = true;
+      setVoiceError("El servicio de voz se pausó temporalmente.");
+      setVoiceChartingMode(false);
     };
 
     rec.onend = () => {
-      // Auto restart to remain fully active
-      if (voiceStateRef.current.selectedTooth) { // standard check
+      handledIndices.clear();
+      // Auto-restart only if active and no fatal error occurred
+      if (!isTerminated && voiceStateRef.current.selectedTooth) {
         try {
           rec.start();
-        } catch (err) {}
+        } catch {
+          isTerminated = true;
+        }
       }
     };
 
     try {
       rec.start();
-      setRecognitionInstance(rec);
-    } catch (err) {
-      console.error("Error starting SpeechRecognition", err);
+      recognitionRef.current = rec;
+    } catch {
+      setVoiceError("No se pudo activar el micrófono. Verifica los permisos de tu navegador.");
+      setVoiceChartingMode(false);
     }
 
     return () => {
+      isTerminated = true;
       if (rec) {
         try {
           rec.stop();
-        } catch (e) {}
+        } catch {
+          // safe
+        }
       }
+      recognitionRef.current = null;
     };
   }, [voiceChartingMode]);
-
-  const handlePocketChange = (
-    toothNum: number,
-    surface: "vestibularPocket" | "palatinoPocket" | "vestibularRecess" | "palatinoRecess",
-    position: "mesial" | "central" | "distal",
-    val: number
-  ) => {
-    const updated = { ...periodontogram };
-    const tooth = { ...updated[toothNum] };
-    
-    // Copy inner state
-    const values = { ...tooth[surface] } as any;
-    values[position] = Math.max(0, val);
-    tooth[surface] = values;
-    
-    updated[toothNum] = tooth;
-    onChange(updated);
-  };
-
-  const handleToggleFlag = (
-    toothNum: number,
-    surface: "sangradoVestibular" | "sangradoPalatino" | "placaVestibular" | "placaPalatino",
-    position: "mesial" | "central" | "distal"
-  ) => {
-    const updated = { ...periodontogram };
-    const tooth = { ...updated[toothNum] };
-    
-    const flags = { ...tooth[surface] } as any;
-    flags[position] = !flags[position];
-    tooth[surface] = flags;
-    
-    updated[toothNum] = tooth;
-    onChange(updated);
-  };
-
-  const handleToggleSupuracion = (
-    toothNum: number,
-    surface: "supuracionVestibular" | "supuracionPalatino",
-    position: "mesial" | "central" | "distal"
-  ) => {
-    const updated = { ...periodontogram };
-    const tooth = { ...updated[toothNum] };
-    
-    const flags = { ...tooth[surface] } as any;
-    flags[position] = !flags[position];
-    tooth[surface] = flags;
-    
-    updated[toothNum] = tooth;
-    onChange(updated);
-  };
 
   const handleNumberFlag = (toothNum: number, field: "movilidad" | "furca", val: 0 | 1 | 2 | 3) => {
     const updated = { ...periodontogram };
@@ -937,6 +974,30 @@ function PeriodontogramaComponent({ periodontogram, onChange, odontogram, patien
 
         {/* Arch Selector Pill & Quick Action Tools */}
         <div className="flex flex-wrap items-center gap-2">
+          {onOpenChairMode && (
+            <button
+              onClick={onOpenChairMode}
+              className="px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white shadow-md active:scale-95"
+              title="Activar Modo Sillón Clínico con botones XL sanitarios, manos libres por voz, sondaje 6P, PSR, Odontograma y O'Leary (Alt+S)"
+            >
+              <Stethoscope className="w-3.5 h-3.5" />
+              <span>Modo Sillón (XL + Voz)</span>
+              <span className="text-[9px] bg-white/20 px-1.5 py-0.5 rounded font-mono font-bold">Alt+S</span>
+            </button>
+          )}
+
+          {onNavigateToPsr && (
+            <button
+              onClick={onNavigateToPsr}
+              className="px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/40 dark:hover:bg-teal-900/60 text-teal-700 dark:text-teal-300 border border-teal-200/80 dark:border-teal-800/80 shadow-xs"
+              title="Ir al Tamizaje Periodontal Rápido PSR (OMS) por sextantes"
+            >
+              <Activity className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+              <span>Tamizaje PSR OMS</span>
+              <span className="text-[9px] bg-teal-600 text-white dark:bg-teal-400 dark:text-slate-950 px-1.5 py-0.5 rounded-full font-bold">Rápido</span>
+            </button>
+          )}
+
           <button
             onClick={() => setIsFastProbingActive(!isFastProbingActive)}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
@@ -1222,9 +1283,12 @@ function PeriodontogramaComponent({ periodontogram, onChange, odontogram, patien
                 <div className="flex items-center gap-3.5">
                   <button
                     onClick={() => {
-                      setVoiceChartingMode(!voiceChartingMode);
                       if (!voiceChartingMode) {
+                        setVoiceError(null);
+                        setVoiceChartingMode(true);
                         setKeyboardMode(true); // Auto-enable keyboard metrics logic for coordination
+                      } else {
+                        setVoiceChartingMode(false);
                       }
                     }}
                     className={`text-xs font-bold py-1.5 px-4 rounded-full border cursor-pointer transition-all flex items-center gap-1.5 ${
@@ -1247,6 +1311,22 @@ function PeriodontogramaComponent({ periodontogram, onChange, odontogram, patien
                   </button>
                 </div>
               </div>
+
+              {/* Voice Error Notice if blocked or unsupported */}
+              {voiceError && (
+                <div className="bg-amber-500/10 border border-amber-500/25 text-amber-800 dark:text-amber-200 px-3.5 py-2.5 rounded-xl text-xs flex items-center justify-between gap-3 animate-in fade-in">
+                  <div className="flex items-center gap-2">
+                    <span className="text-amber-600 dark:text-amber-400 font-bold">⚠️ Micrófono:</span>
+                    <span>{voiceError}</span>
+                  </div>
+                  <button
+                    onClick={() => setVoiceError(null)}
+                    className="text-[11px] font-bold text-amber-700 dark:text-amber-300 hover:underline cursor-pointer shrink-0"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              )}
 
               {/* Voice Guide Panel and Live Transcript */}
               {voiceChartingMode && (
@@ -1872,30 +1952,44 @@ function PeriodontogramaComponent({ periodontogram, onChange, odontogram, patien
                             <Droplet className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
                           </button>
 
-                          {/* Plaque Index (PI) */}
-                          <button 
-                            onClick={() => handleToggleFlag(selectedTooth, plaqueMetric, pos)}
-                            className={`p-2.5 sm:p-1.5 min-w-[44px] sm:min-w-[0] min-h-[44px] sm:min-h-[0] rounded-lg transition-all border flex items-center justify-center shrink-0 cursor-pointer ${
-                              plaqueActive 
-                                ? "bg-amber-400 text-slate-800 border-amber-400 shadow-xs" 
-                                : "bg-white dark:bg-slate-800 text-slate-400 dark:text-slate-500 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/15 border-slate-200 dark:border-slate-800"
-                            }`}
-                            title="Presencia de Placa Bacteriana"
-                          >
-                            <CircleDot className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-                          </button>
-
-                          {/* Suppuration outflow toggle */}
+                          {/* Suppuration / Pus (Yellow button) */}
                           <button 
                             onClick={() => handleToggleSupuracion(selectedTooth, suppMetric, pos)}
                             className={`p-2.5 sm:p-1.5 min-w-[44px] sm:min-w-[0] min-h-[44px] sm:min-h-[0] rounded-lg transition-all border flex items-center justify-center shrink-0 cursor-pointer ${
                               suppActive 
-                                ? "bg-cyan-500 text-white border-cyan-500 shadow-xs" 
-                                : "bg-white dark:bg-slate-800 text-slate-500 hover:text-cyan-500 hover:bg-cyan-50 dark:hover:bg-cyan-500/15 border-slate-200 dark:border-slate-800"
+                                ? "bg-amber-400 text-slate-950 border-amber-400 shadow-xs" 
+                                : "bg-white dark:bg-slate-800 text-slate-400 dark:text-slate-500 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/15 border-slate-200 dark:border-slate-800"
                             }`}
-                            title="Supuración Activa (Pus)"
+                            title="Supuración activa / Exudado purulento (Pus)"
                           >
-                            <span className="text-[10px] sm:text-[7.5px] font-sans font-bold block">Pus</span>
+                            <CircleDot className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                          </button>
+
+                          {/* Furca Involvement button */}
+                          <button 
+                            onClick={() => {
+                              const currentGrade = activeToothData.furca || 0;
+                              const nextGrade = ((currentGrade + 1) % 4) as 0 | 1 | 2 | 3;
+                              handleNumberFlag(selectedTooth, "furca", nextGrade);
+                            }}
+                            className={`p-2.5 sm:p-1.5 min-w-[44px] sm:min-w-[0] min-h-[44px] sm:min-h-[0] rounded-lg transition-all border flex items-center justify-center shrink-0 cursor-pointer ${
+                              activeToothData.furca === 1
+                                ? "bg-indigo-500 text-white border-indigo-500 shadow-xs"
+                                : activeToothData.furca === 2
+                                ? "bg-purple-600 text-white border-purple-600 shadow-xs"
+                                : activeToothData.furca === 3
+                                ? "bg-rose-600 text-white border-rose-600 shadow-xs ring-1 ring-rose-400"
+                                : "bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-500/15 border-slate-200 dark:border-slate-800"
+                            }`}
+                            title={
+                              activeToothData.furca > 0 
+                                ? `Compromiso de Furca: Grado ${activeToothData.furca} (Hamp). Clic para cambiar grado.` 
+                                : "Compromiso de Furca (Hamp): Clic para alternar Grados 0, I, II, III"
+                            }
+                          >
+                            <span className="text-[10px] sm:text-[7.5px] font-sans font-bold block">
+                              {activeToothData.furca > 0 ? `F${activeToothData.furca}` : "Furca"}
+                            </span>
                           </button>
                         </div>
                       </div>
@@ -1944,7 +2038,7 @@ function PeriodontogramaComponent({ periodontogram, onChange, odontogram, patien
                             : "bg-slate-50 dark:bg-slate-800 text-slate-400 dark:text-slate-400 border-slate-200 dark:border-slate-700"
                         }`}
                       >
-                        C{grade}
+                        F{grade}
                       </button>
                     ))}
                   </div>

@@ -40,6 +40,27 @@ export interface OLearyState {
   lingual: boolean;
 }
 
+// Periodontal Screening and Recording (PSR) - Tamizaje Periodontal OMS
+export type PsrCode = 0 | 1 | 2 | 3 | 4 | 'X' | null;
+
+export interface PsrSextant {
+  code: PsrCode;
+  hasAsterisk: boolean; // Furca, movilidad >= 2, recesión >= 3.5mm, defecto mucogingival
+  notes?: string;
+}
+
+export interface PsrRecord {
+  s1: PsrSextant; // 18-14 (Sup. Derecho)
+  s2: PsrSextant; // 13-23 (Sup. Anterior)
+  s3: PsrSextant; // 24-28 (Sup. Izquierdo)
+  s4: PsrSextant; // 38-34 (Inf. Izquierdo)
+  s5: PsrSextant; // 33-43 (Inf. Anterior)
+  s6: PsrSextant; // 44-48 (Inf. Derecho)
+  updatedAt?: string;
+  evaluatedBy?: string;
+  globalRecommendation?: string;
+}
+
 export interface Anamnesis {
   motivoConsulta?: string;
   historiaMotivoConsulta?: string;
@@ -219,6 +240,7 @@ export interface Patient {
   periodontogram: Record<number, PeriodonState>;
   periodontogramHistory?: PeriodontogramVisit[];
   oLeary: Record<number, OLearyState>;
+  psr?: PsrRecord;
   anamnesis: Anamnesis;
   xRays: XRayImage[];
   clinicalPhotos?: ClinicalPhoto[];
@@ -255,12 +277,14 @@ export type HipaaActionType =
   | 'VIEW_PRA_ASSESSMENT'
   | 'VIEW_PERIODONTOGRAM'
   | 'VIEW_OLEARY_INDEX'
+  | 'VIEW_PSR_INDEX'
   | 'COMPARE_PERIODONTOGRAM'
   | 'CREATE_PATIENT'
   | 'UPDATE_PATIENT_INFO'
   | 'UPDATE_PATIENT_RECORD'
   | 'UPDATE_ODONTOGRAM'
   | 'UPDATE_PERIODONTOGRAM'
+  | 'UPDATE_PSR_RECORD'
   | 'UPDATE_ANAMNESIS'
   | 'UPDATE_TREATMENT_PLAN'
   | 'DELETE_TREATMENT_PROCEDURE'
@@ -268,6 +292,7 @@ export type HipaaActionType =
   | 'SIGN_CONSENT_FORM'
   | 'DELETE_CONSENT_FORM'
   | 'UPLOAD_CLINICAL_PHOTO'
+  | 'CAPTURE_CHAIR_PHOTO'
   | 'DELETE_CLINICAL_PHOTO'
   | 'UPLOAD_XRAY_IMAGE'
   | 'DELETE_XRAY_IMAGE'
@@ -376,4 +401,17 @@ export interface ClinicalUser {
   status?: 'active' | 'suspended' | 'pending';
   createdAt: string;
 }
+
+export type ActiveTab =
+  | 'dashboard'
+  | 'flujo'
+  | 'clinica'
+  | 'agenda'
+  | 'finanzas'
+  | 'dentalstories'
+  | 'reportes'
+  | 'pacientes'
+  | 'ajustes'
+  | 'tienda'
+  | 'bolsa-empleo';
 

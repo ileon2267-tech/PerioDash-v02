@@ -1,12 +1,25 @@
-import React, { useState, useRef, useEffect } from "react";
-import { Patient, ChatMessage } from "../types";
+import React, { useState, useRef, useEffect, useMemo } from "react";
+import { Patient, ChatMessage, ClinicalUser } from "../types";
 import { 
   Send, Maximize2, Minimize2, Mic, AlertTriangle, Activity, HeartPulse, 
   BrainCircuit, Search, Info, Move, ShieldAlert, Volume2, VolumeX,
-  Paperclip, FileText, Check, Upload, X, Sparkles, RefreshCw, Play, Trash2, Database, Sliders
+  Paperclip, FileText, Check, Upload, X, Sparkles, RefreshCw, Play, Trash2, Database, Sliders,
+  HelpCircle, MicOff, ChevronLeft, ChevronRight, SlidersHorizontal, Eye, ShieldCheck,
+  CheckCircle2, Grid, FileEdit, Copy, Layers, Lock
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { safeStorage } from "../utils/safeStorage";
+import { copyToClipboardSafely } from "../utils/safeClipboard";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import {
+  ContextModeId,
+  ClinicalContextConfig,
+  ContextModeOption,
+  CONTEXT_MODES,
+  DEFAULT_CONTEXT_CONFIG,
+  buildStructuredClinicalPayload,
+} from "../utils/dentitoContext";
 
 interface DentitoChatProps {
   activePatient: Patient | null;
@@ -17,6 +30,7 @@ interface DentitoChatProps {
   doctorName?: string;
   clinicName?: string;
   aranceles?: Record<string, number>;
+  currentUser?: ClinicalUser | null;
 }
 
 // Helper: Custom Event dispatcher to interact with App.tsx navigation/selection
@@ -132,7 +146,8 @@ function DentitoChatComponent({
   clinicalSubView = "odontograma",
   doctorName = "Dr. Ignacio León",
   clinicName = "PerioClinic Providencia",
-  aranceles
+  aranceles,
+  currentUser
 }: DentitoChatProps) {
   // File Scanning and Heuristics States
   const [attachedFile, setAttachedFile] = useState<any>(null);
@@ -274,7 +289,7 @@ He completado el análisis espectrográfico e interpretación semántica del arc
     {
       id: "init-1",
       role: "assistant",
-      content: "¡Hola! Soy **Dentito**, tu asistente clínico digital. Puedo ayudarte a analizar mapas periodontales en tiempo real, guiarte en protocolos de emergencias médicas en odontología o navegar rápidamente por las herramientas de PerioDash.",
+      content: "¡Hola! Soy **Dentito** 🦷✨, tu copiloto clínico en PerioDash. Estoy aquí para acompañarte en tus evaluaciones periodontales, dictado por voz en el sillón dental, análisis de radiografías y protocolos clínicos. ¿En qué te puedo colaborar hoy?",
       createdAt: new Date().toISOString(),
     },
   ]);
@@ -290,10 +305,86 @@ He completado el análisis espectrográfico e interpretación semántica del arc
   const [emergencyMode, setEmergencyMode] = useState<string | null>(null); 
   const isDraggingRef = useRef(false);
 
+  // Structured Clinical Context Settings & Mode Configuration
+  const [contextConfig, setContextConfig] = useState<ClinicalContextConfig>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = safeStorage.getItem("dentito-context-config");
+        if (saved) {
+          return JSON.parse(saved);
+        }
+      } catch (e) {
+        console.error("Error loading dentito context config:", e);
+      }
+    }
+    return DEFAULT_CONTEXT_CONFIG;
+  });
+  const [showContextModal, setShowContextModal] = useState(false);
+  const [showContextInspector, setShowContextInspector] = useState(false);
+  const [copiedPayload, setCopiedPayload] = useState(false);
+
+  // Control de Acceso: El usuario común (paciente, odontólogo estándar, recepcionista)
+  // NO debe ver el Inspector de Contexto Clínico ni payloads JSON técnicos.
+  // Solo usuarios con rol 'superadmin', 'admin', 'supervisor' o permiso 'audit_supervision' pueden acceder.
+  const canInspectPayload = useMemo(() => {
+    if (!currentUser) return false;
+    const privilegedRoles = ['superadmin', 'admin', 'supervisor'];
+    if (privilegedRoles.includes(currentUser.role)) return true;
+    if (currentUser.isSupervisor) return true;
+    if (currentUser.permissions?.includes('audit_supervision')) return true;
+    return false;
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!canInspectPayload && showContextInspector) {
+      setShowContextInspector(false);
+    }
+  }, [canInspectPayload, showContextInspector]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      safeStorage.setItem("dentito-context-config", JSON.stringify(contextConfig));
+    }
+  }, [contextConfig]);
+
+  const handleSelectContextMode = (modeId: ContextModeId) => {
+    if (modeId === "custom") {
+      setContextConfig(prev => ({ ...prev, mode: "custom" }));
+    } else {
+      const preset = CONTEXT_MODES[modeId];
+      if (preset) {
+        setContextConfig({
+          mode: modeId,
+          ...preset.defaultConfig,
+        });
+      }
+    }
+  };
+
+  const handleToggleModule = (key: keyof Omit<ClinicalContextConfig, "mode">) => {
+    setContextConfig(prev => ({
+      ...prev,
+      [key]: !prev[key],
+      mode: "custom" as ContextModeId,
+    }));
+  };
+
+  // Live calculation of payload & token consumption for preview
+  const liveContextPayload = useMemo(() => {
+    return buildStructuredClinicalPayload(activePatient, contextConfig, {
+      activeTab,
+      clinicalSubView,
+      doctorName,
+      clinicName,
+      totalPatients: patients.length,
+      totalAppointmentsToday: appointments.length,
+    });
+  }, [activePatient, contextConfig, activeTab, clinicalSubView, doctorName, clinicName, patients.length, appointments.length]);
+
   const [speechSupported, setSpeechSupported] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("dentito-tts-enabled");
+      const saved = safeStorage.getItem("dentito-tts-enabled");
       return saved === "true";
     }
     return false;
@@ -301,7 +392,7 @@ He completado el análisis espectrográfico e interpretación semántica del arc
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      localStorage.setItem("dentito-tts-enabled", String(ttsEnabled));
+      safeStorage.setItem("dentito-tts-enabled", String(ttsEnabled));
     }
   }, [ttsEnabled]);
 
@@ -392,7 +483,7 @@ He completado el análisis espectrográfico e interpretación semántica del arc
   
   const [positionState, setPositionState] = useState<DentitoPosition>(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("dentito-position");
+      const saved = safeStorage.getItem("dentito-position");
       if (saved && ["bottom-right", "bottom-left", "top-right", "top-left", "fullscreen"].includes(saved)) {
         return saved as DentitoPosition;
       }
@@ -404,7 +495,7 @@ He completado el análisis espectrográfico e interpretación semántica del arc
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      localStorage.setItem("dentito-position", positionState);
+      safeStorage.setItem("dentito-position", positionState);
     }
   }, [positionState]);
 
@@ -451,6 +542,14 @@ He completado el análisis espectrográfico e interpretación semántica del arc
   };
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const chipsScrollRef = useRef<HTMLDivElement>(null);
+
+  const scrollChips = (dir: "left" | "right") => {
+    if (chipsScrollRef.current) {
+      const delta = dir === "left" ? -220 : 220;
+      chipsScrollRef.current.scrollBy({ left: delta, behavior: "smooth" });
+    }
+  };
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -556,70 +655,122 @@ He completado el análisis espectrográfico e interpretación semántica del arc
   const processInternalCommand = (text: string): string | null => {
     const raw = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
+    // 0. Voice Commands & Dictation Guide
+    if (raw.includes("comando") || raw.includes("comandos") || raw.includes("voz") || raw.includes("dictado") || raw.includes("como dictar") || raw.includes("como hablar") || raw.includes("microfono") || raw.includes("ayuda")) {
+      return `🎙️ **¡Con muchísimo gusto! Aquí tienes la guía de Comandos de Voz de PerioDash 🦷✨**
+
+Puedes dictarme directamente mientras estás en el sillón dental con guantes puestos. La interfaz registrará los datos de forma instantánea:
+
+---
+
+### 🦷 **1. Seleccionar Piezas Dentales**
+*   🗣️ Di *"Pieza 1.6"* o *"Pieza uno seis"* ➔ Selecciona y enfoca el primer molar superior derecho.
+*   🗣️ Di *"Siguiente"* o *"Diente siguiente"* ➔ Avanza a la siguiente pieza en orden FDI.
+*   🗣️ Di *"Anterior"* o *"Diente anterior"* ➔ Retrocede una pieza.
+
+### 📏 **2. Registro de Sondaje Periodontal (PPD a 6 puntos)**
+*   🗣️ Di *"Sondaje 3 2 3"* ➔ Registra automáticamente 3mm (Distal), 2mm (Medio) y 3mm (Mesial).
+*   🗣️ Di *"Recesión 1 0 1"* ➔ Asigna los milímetros de margen gingival en las tres caras.
+*   🗣️ Di *"Margen 2"* ➔ Registra la medida de margen o recesión.
+
+### 🩸 **3. Sangrado y Placa Bacteriana**
+*   🗣️ Di *"Sangrado sí"* o *"Sangrado vestibular"* ➔ Marca presencia de sangrado al sondaje (BOP).
+*   🗣️ Di *"Placa sí"* o *"Placa no"* ➔ Computa el índice de higiene O'Leary al instante.
+
+### 🚀 **4. Navegación Rápida y Modo Sillón Manos Libres**
+*   🗣️ Di *"Modo sillón"* ➔ Activa al instante la interfaz ergonómica XL con botones táctiles sanitarios, dictado continuo y cámara en vivo.
+*   🗣️ Di *"Ir a Odontograma"* o *"Ir a Periodontograma"* ➔ Abre la vista clínica correspondiente.
+*   🗣️ Di *"Ver Agenda"* o *"Citas hoy"* ➔ Te muestra el cronograma del día.
+*   🗣️ Di *"Analizar paciente"* ➔ Audita el historial y calcula el riesgo periodontal.
+*   🗣️ Di *"Emergencia"* ➔ Abre inmediatamente los protocolos de soporte vital y urgencias médicas.
+
+---
+
+💡 **Tip clínico amigable**: Activa el micrófono pulsando el botón circular de la barra inferior o presiona \`Ctrl+K\` para búsquedas rápidas. ¿Te gustaría practicar algún comando o revisar la ficha de tu paciente? ¡Estoy aquí para apoyarte! 😊`;
+    }
+
     // 1. Emergency
     if (raw.includes("emergencia") || raw.includes("protocolo de emergencia") || raw.includes("modo emergencia")) {
       setEmergencyMode("selector");
-      return "He activado el panel de emergencias médicas de PerioDash. Por favor selecciona la condición crítica en tu pantalla para ver el protocolo de estabilización.";
+      return "🚨 **¡Entendido de inmediato!** He activado el panel de emergencias médicas de PerioDash. Por favor selecciona la condición crítica en tu pantalla para guiarte en el protocolo de soporte y estabilización paso a paso.";
+    }
+
+    // Modo Sillón Clínico (Chair Mode voice activation)
+    if (
+      raw.includes("modo sillon") ||
+      raw.includes("modo sillón") ||
+      raw.includes("sillon clinico") ||
+      raw.includes("abrir sillon") ||
+      raw.includes("activar sillon") ||
+      raw.includes("entrar a modo sillon") ||
+      raw.includes("entrar al sillon") ||
+      raw.includes("chair mode") ||
+      raw === "sillon" ||
+      raw === "sillón"
+    ) {
+      window.dispatchEvent(new CustomEvent('periodash-open-chair-mode'));
+      dispatchPeriodashNav("sillon");
+      return "💺 **¡Comando de voz reconocido!** Activando de inmediato el **Modo Sillón Clínico (XL + Dictado por Voz)** para trabajar con guantes estériles y control manos libres.";
     }
     
     // 2. Navigation
     if (raw.includes("ir a agenda") || raw.includes("abre agenda") || raw.includes("citas hoy")) {
       dispatchPeriodashNav("agenda");
-      return "Redireccionando de inmediato al módulo de Agenda y Calendario de citas médicas.";
+      return "📅 **¡Con gusto!** Te he llevado de inmediato al módulo de **Agenda y Calendario de Citas**. ¡Aquí puedes revisar tus horarios y pacientes del día!";
     }
     if (raw.includes("ir a dashboard") || raw.includes("resumen")) {
       dispatchPeriodashNav("dashboard");
-      return "Volviendo al panel de control (Dashboard) general de la plataforma de PerioDash.";
+      return "📊 **¡Listo!** Volviendo al **Dashboard Analítico General** de PerioDash. ¡Aquí tienes el panorama global de tu consulta!";
     }
     if (raw.includes("ir a pacientes") || raw.includes("directorio") || raw.includes("cuantos pacientes")) {
       if (raw.includes("cuantos pacientes")) {
         // Fall through to patient list heuristics
       } else {
         dispatchPeriodashNav("pacientes");
-        return "Abriendo el directorio completo de pacientes clínicos de la consulta.";
+        return "👥 **¡Por supuesto!** Abriendo el **Directorio Completo de Pacientes** clínicos de la consulta.";
       }
     }
-    if (raw.includes("ir a facturación") || raw.includes("finanzas") || raw.includes("factura") || raw.includes("facturas")) {
+    if (raw.includes("ir a facturacion") || raw.includes("facturación") || raw.includes("finanzas") || raw.includes("factura") || raw.includes("facturas")) {
       dispatchPeriodashNav("facturacion");
-      return "Accediendo al panel de finanzas, recaudación por aranceles y liquidaciones.";
+      return "💳 **¡De acuerdo!** Accediendo al panel de **Finanzas, Aranceles y Liquidaciones**.";
     }
     
     // Subtrames of Clinica / Expediente
     if (raw.includes("odontograma") || raw.includes("dientes")) {
       dispatchPeriodashNav({ tab: "clinica", subView: "odontograma" });
-      return "Abriendo el Odontograma anatómico adaptativo en 2D/35 caras con FDI.";
+      return "🦷 **¡Excelente!** Abriendo el **Odontograma Anatómico Adaptativo en 2D** con notación FDI de 32 piezas.";
     }
     if (raw.includes("periodontograma") || raw.includes("sondaje") || raw.includes("bolsas periodontales")) {
       dispatchPeriodashNav({ tab: "clinica", subView: "periodontograma" });
-      return "Mostrando el visor anatómico de Periodontograma clínico con graficación biométrica de sondaje, recesión, placa y sangrado.";
+      return "📏 **¡Perfecto!** Mostrando el visor de **Periodontograma Clínico Biométrico** con registro a 6 puntos de sondaje, recesión, placa y sangrado.";
     }
     if (raw.includes("asistente soap") || raw.includes("soap") || raw.includes("diagnostico soap")) {
       dispatchPeriodashNav({ tab: "clinica", subView: "soap" });
-      return "Cargando el Copiloto Clínico SOAP. Puedes emitir resúmenes de evolución o prescribir notas rápido.";
+      return "📝 **¡Con gusto!** Cargando el **Copiloto Clínico SOAP**. ¡Te ayudo a redactar notas y prescripciones de evolución en segundos!";
     }
     if (raw.includes("riesgo periodontal") || raw.includes("riesgo") || raw.includes("evaluacion de riesgo") || raw.includes("riesgo pra")) {
       dispatchPeriodashNav({ tab: "clinica", subView: "pra" });
-      return "Accediendo al visor predictivo del Análisis de Riesgo Periodontal (PRA Hexagonal).";
+      return "🎯 **¡Entendido!** Accediendo al visor del **Análisis de Riesgo Periodontal (PRA Hexagonal)**.";
     }
     if (raw.includes("oleary") || raw.includes("placa bacteriana") || raw.includes("control de placa")) {
       dispatchPeriodashNav({ tab: "clinica", subView: "oleary" });
-      return "Abriendo calculadora paramétrica del Índice de Placa Bacteriana O'Leary.";
+      return "🧼 **¡Por supuesto!** Abriendo la calculadora interactiva del **Índice de Placa Higiénico O'Leary**.";
     }
     if (raw.includes("radiografia") || raw.includes("radiografias") || raw.includes("rayos") || raw.includes("galeria")) {
       dispatchPeriodashNav({ tab: "clinica", subView: "xrays" });
-      return "Mostrando el panel de radiologías analíticas, tomografías integradas e interpretación AI.";
+      return "🩻 **¡Listo!** Mostrando el panel de **Radiografías Digitales** e interpretación analítica con IA.";
     }
     if (raw.includes("presupuesto") || raw.includes("tratamiento") || raw.includes("plan financiero") || raw.includes("cotizacion")) {
       dispatchPeriodashNav({ tab: "clinica", subView: "presupuesto" });
-      return "Cargando el calculador dinámico de presupuestos basados en cobertura clínica y plan de financiamiento.";
+      return "💰 **¡De acuerdo!** Cargando el **Plan de Presupuestos Terapéuticos** y financiamiento clínico.";
     }
     if (raw.includes("ir a clinica") || raw.includes("abre clinica") || raw.includes("expediente") || raw.includes("abre expediente") || raw.includes("ver ficha")) {
       dispatchPeriodashNav("clinica");
-      return "Accediendo al expediente unificado e historia clínica del paciente seleccionado.";
+      return "📋 **¡Con gusto!** Accediendo al **Expediente Clínico Dental** e historia unificada del paciente seleccionado.";
     }
     if (raw.includes("historias") || raw.includes("casos clinicos") || raw.includes("foro") || raw.includes("universidad")) {
       dispatchPeriodashNav("historias");
-      return "Abriendo canal académico y foro odontológico de discusión clínica universitaria.";
+      return "🎓 **¡Excelente!** Abriendo el **Canal Académico y Foro de Discusión Clínica Universitaria**.";
     }
 
     // --- ENHANCED OFFLINE HEURISTICS WITH HIGH INTELLECTUAL VALUE ---
@@ -628,9 +779,9 @@ He completado el análisis espectrográfico e interpretación semántica del arc
     if (raw.includes("pacientes") || raw.includes("directorios") || (raw.includes("paciente") && (raw.includes("lista") || raw.includes("todos") || raw.includes("cuantos") || raw.includes("rut")))) {
       if (patients && patients.length > 0) {
         const rows = patients.map(p => `| **${p.name}** | \`${p.rut || p.dni || "S/RUT"}\` | ${p.phone} | ${p.birthdate} | \`Activo\` |`).join("\n");
-        return `📋 **Directorio de Pacientes - Análisis Local**\n\nHe escaneado el registro general de la clínica y encontré **${patients.length} pacientes activos** en el sistema:\n\n| Nombre del Paciente | RUT / DNI | Teléfono | Fecha Nacimiento | Estado |\n| :--- | :--- | :--- | :--- | :--- |\n${rows}\n\n*Puedes pulsar el buscador \`Ctrl+K\` en cualquier momento para ubicar su ficha clínica de inmediato por RUT o nombre.*`;
+        return `👥 **Directorio de Pacientes - Análisis Local**\n\n¡He revisado tu base de datos! Encontré **${patients.length} pacientes activos** en el sistema:\n\n| Nombre del Paciente | RUT / DNI | Teléfono | Fecha Nacimiento | Estado |\n| :--- | :--- | :--- | :--- | :--- |\n${rows}\n\n💡 *Recuerda que puedes presionar \`Ctrl+K\` en cualquier momento para ubicar a un paciente al instante.*`;
       } else {
-        return "Actualmente dispones de una lista inicial de pacientes cargada en local. Selecciona la pestaña **Pacientes** para agregar más expedientes.";
+        return "Actualmente dispones de una lista inicial de pacientes en local. ¡Selecciona la pestaña **Pacientes** para agregar más expedientes!";
       }
     }
 
@@ -638,9 +789,9 @@ He completado el análisis espectrográfico e interpretación semántica del arc
     if (raw.includes("cita") || raw.includes("agenda") || raw.includes("quien sigue") || raw.includes("citas hoy") || raw.includes("agenda de hoy")) {
       if (appointments && appointments.length > 0) {
         const rows = appointments.map(a => `| ${a.time} | **${a.patientName}** | \`${a.treatment}\` | ${a.box || "Sillón 1"} | \`${a.status}\` |`).join("\n");
-        return `📅 **Agenda de Trabajo & Cola de Pacientes**\n\nAquí tienes el cronograma integrado de citas médicas activas en la base de datos local:\n\n| Hora | Paciente | Tratamiento Clínico | Ubicación | Estado |\n| :--- | :--- | :--- | :--- | :--- |\n${rows}\n\n*Consejo clínico:* El sillón dental está configurado para un promedio de 45 minutos por sesión periodontal. Puedes re-agendar cualquier cita deslizando el bloque en la Agenda.`;
+        return `📅 **Agenda de Trabajo y Pacientes de Hoy**\n\n¡Aquí tienes el cronograma de citas programadas para hoy! ✨\n\n| Hora | Paciente | Tratamiento Clínico | Ubicación | Estado |\n| :--- | :--- | :--- | :--- | :--- |\n${rows}\n\n💡 *Tip amigable:* Las sesiones periodontales están estimadas en 45 minutos. Puedes arrastrar cualquier bloque en la Agenda para re-agendar con total comodidad.`;
       } else {
-        return "No hay citas programadas para hoy según el registro clínico, pero puedes registrar una libremente en la pestaña de **Agenda**.";
+        return "¡Hoy no tienes citas programadas en el registro clínico! Puedes agendar una fácilmente desde la pestaña de **Agenda** 📅.";
       }
     }
 
@@ -669,13 +820,13 @@ He completado el análisis espectrográfico e interpretación semántica del arc
       const tabLabel = tabLabels[activeTab] || activeTab;
       const subLabel = activeTab === "clinica" ? ` > **${subLabels[clinicalSubView] || clinicalSubView}**` : "";
       
-      return `💻 **Mapeador de Navegación de Interfaz**\n\n*   **Módulo Activo**: ${tabLabel}${subLabel}\n*   **Doctor Responsable**: ${doctorName}\n*   **Centro Clínico**: ${clinicName}\n\n**Comandos rápidos aplicables aquí:**\n- Para ir a ver dientes di: *"Odontograma"* o *"Periodontograma"*\n- Para ver las citas programadas di: *"Agenda"* o *"Citas hoy"*\n- Para iniciar protocolo de emergencia di: *"Emergencia"*`;
+      return `💻 **Ubicación Actual en PerioDash** ✨\n\n*   **Módulo Activo**: ${tabLabel}${subLabel}\n*   **Doctor(a)**: ${doctorName}\n*   **Centro Clínico**: ${clinicName}\n\n**Comandos rápidos útiles:**\n- Para ver piezas dentales di: *"Odontograma"* o *"Periodontograma"*\n- Para ver las citas programadas di: *"Agenda"* o *"Citas hoy"*\n- Para consultar protocolos de urgencia di: *"Emergencia"*`;
     }
 
     // 4. Analizar Paciente / Resumen Clínico Detallado
     if (raw.includes("analizar paciente") || (raw.includes("analizar") && (raw.includes("carlos") || raw.includes("activo") || raw.includes("paciente") || raw.includes("ficha")))) {
       if (!activePatient) {
-        return "No tienes ningún paciente activo seleccionado en el sillón dental en estos momentos. Por favor haz clic en un paciente en el directorio para que pueda auditar su ficha clínicamente.";
+        return "¡Aún no has seleccionado un paciente activo en el sillón! 🦷 Por favor haz clic en cualquier paciente del directorio para que pueda auditar su ficha y brindarte recomendaciones.";
       }
 
       const info = getPatientSummaryData();
@@ -683,24 +834,24 @@ He completado el análisis espectrográfico e interpretación semántica del arc
       
       // Compute systemic flags
       const systemicFlags = [];
-      if (anam.diabetes) systemicFlags.push("🚨 **Diabetes Tipo 2 No Controlada** (Riesgo periodontal Grado C secundario, retardo cicatrización)");
-      if (anam.hta) systemicFlags.push("💊 **Hipertensión Arterial activa** (Cuidado con anestésicos locales con vasoconstrictor epinefrina, riesgo de crisis hipertensiva)");
-      if (anam.tabaquismo > 0) systemicFlags.push(`🚬 **Fumador Activo** (${anam.tabaquismo} cig/día - Isquemia periférica gingival, inhibición en curación de bolsas)`);
+      if (anam.diabetes) systemicFlags.push("🚨 **Diabetes Tipo 2**: Precaución con retardo en cicatrización y riesgo periodontal Grado C.");
+      if (anam.hta) systemicFlags.push("💊 **Hipertensión Arterial**: Usar con prudencia anestésicos con vasoconstrictor.");
+      if (anam.tabaquismo > 0) systemicFlags.push(`🚬 **Tabaquismo Activo** (${anam.tabaquismo} cig/día): Puede enmascarar sangrado e inhibir la respuesta tisular.`);
       if (anam.alergias && anam.alergias !== "Ninguna" && anam.alergias !== "ninguna") systemicFlags.push(`⚠️ **Alergia Reportada**: *${anam.alergias}*`);
 
       const systemicSection = systemicFlags.length > 0 
-        ? `⚠️ **INFORMACIÓN SISTÉMICA DE RIESGO DE ${activePatient.name.toUpperCase()}**:\n${systemicFlags.join("\n")}`
-        : "✅ **Expediente Sistémico**: El paciente no reporta condiciones de alarma sistémica activa.";
+        ? `⚠️ **Aspectos Sistémicos Relevantes (${activePatient.name})**:\n${systemicFlags.join("\n")}`
+        : "✅ **Expediente Sistémico**: El paciente no reporta condiciones de alarma sistémica.";
 
-      return `📊 **Análisis Clínico Omnisciente - ${activePatient.name.toUpperCase()}**\n\n*Esquema consolidado computado en tiempo real basado en el Odontograma y Periodontograma:* \n\n| Indicador Clínico | Medición / Conclusión | Diagnóstico Sugerido |\n| :--- | :--- | :--- |\n| **Índice O'Leary** | **${info.plaquePct}%** de superficies con placa | Higiene deficiente. Requiere profilaxis de saneamiento. |\n| **Caries Coronal** | **${info.cariesCount} caras** infectadas (${info.cariesTeeth.join(', ') || 'Ninguna'}) | Diagnóstico ICDas 4 o 5 detectados. Requiere resinas. |\n| **Bolsas Periodontales** | **${info.totalDeepPockets} superficies** profundas (≥5mm) | Compatible con **Periodontitis Estadio III Activa** |\n| **Soporte Físico** | Missing: ${info.missingCount} \| Implantes: ${info.implantCount} \| Endodoncia: ${info.endoCount} | Pérdida dental periodontal inicial moderada. |\n\n${systemicSection}\n\n📢 **Clasificación Predictiva Sugerida (AAP 2018)**: \n**Periodontitis Estadio III, Grado ${anam.tabaquismo >= 10 || anam.diabetesStatus === "severe" ? "C" : "B"}**, secundario a ${anam.tabaquismo > 0 ? "tabaquismo severo" : "placa de cálculo bacteriano"}.\n\n*   **Tratamiento Prioritario**: 1° Fase de Desinfección Higiénica (Raspaje selectivo con ultrasonido), 2° Evaluación de retracción de encías, 3° Restauraciones adhesivas de caries en piezas afectadas.`;
+      return `📊 **Resumen Clínico Integral - ${activePatient.name.toUpperCase()}** 🦷✨\n\n¡He analizado los datos del Odontograma y Periodontograma en tiempo real!\n\n| Indicador Clínico | Medición / Conclusión | Diagnóstico Sugerido |\n| :--- | :--- | :--- |\n| **Índice O'Leary** | **${info.plaquePct}%** de superficies con placa | Higiene mejorable. Requiere profilaxis de saneamiento. |\n| **Caries Coronal** | **${info.cariesCount} caras** afectadas (${info.cariesTeeth.join(', ') || 'Ninguna'}) | Diagnóstico ICDAS compatible. Sugerir restauraciones adhesivas. |\n| **Bolsas Periodontales** | **${info.totalDeepPockets} superficies** profundas (≥5mm) | Compatible con **Periodontitis Activa** |\n| **Soporte Físico** | Ausentes: ${info.missingCount} \| Implantes: ${info.implantCount} \| Endo: ${info.endoCount} | Soporte dental remanente evaluable. |\n\n${systemicSection}\n\n🎯 **Clasificación Sugerida (AAP 2018)**: \n**Periodontitis Estadio III, Grado ${anam.tabaquismo >= 10 || anam.diabetesStatus === "severe" ? "C" : "B"}**.\n\n*   **Plan Terapéutico Recomendado**: 1° Fase Higiénica (Raspado y Alisado Radicular), 2° Reevaluación a las 4-6 semanas, 3° Tratamiento de caries en piezas afectadas.\n\n¿Deseas que preparemos una nota SOAP o revisemos alguna pieza dental en particular? ¡Estoy a tu servicio! 🌟`;
     }
 
     // 5. Analizar Periodontograma en particular
     if (raw.includes("periodontograma") && (raw.includes("analizar") || raw.includes("bolsas") || raw.includes("profundidad") || raw.includes("sondaje"))) {
-      if (!activePatient) return "Usa la pestaña de clínica para seleccionar un paciente antes de evaluar su periodontograma biométrico.";
+      if (!activePatient) return "¡Selecciona primero un paciente en la pestaña de Clínica para evaluar su periodontograma biométrico! 🦷";
       
       const info = getPatientSummaryData();
-      return `🦷 **Reporte Periodontal de Alta Densidad**\n\nPaciente: **${activePatient.name}**\n\n*   **Profundidades Patológicas (≥ 5mm)**: He detectado **${info.totalDeepPockets} puntos de sondaje agudos** con pérdida de inserción clínica activa.\n*   **Ubicación Principal**: Se concentran mayormente en molares superiores e inferiores (${info.deepPocketsList.join(', ') || 'Ninguno'}). Esto indica defectos angulares o compromiso óseo horizontal interdental.\n*   **Pérdida de Inserción (CAL)**: Se sugiere realizar radiografías periapicales (en aleta de mordida / Bite-wing) en estas zonas para medir el porcentaje exacto de soporte remanente.\n*   **Sangrado (BOP)**: Compatible con inflamación de tejidos blandos supracrestal severa.\n\n**Intervención Propuesta**: Raspado y Alisado Radicular (RAR) por cuadrante, técnica de desinfección total de boca (Full Mouth Disinfection) con irrigación ultrasónica de clorhexidina al 0.12%.`;
+      return `🦷 **Evaluación Periodontal Detallada - ${activePatient.name}** ✨\n\n*   **Bolsas Periodontales Patológicas (≥ 5mm)**: Encontré **${info.totalDeepPockets} puntos de sondaje profundos** con pérdida de inserción clínica activa.\n*   **Ubicación Principal**: Se localizan predominantemente en ${info.deepPocketsList.join(', ') || 'piezas posteriores'}.\n*   **Pérdida de Inserción (CAL)**: Es aconsejable complementar con radiografías periapicales (Bite-wing) para valorar el soporte óseo interproximal.\n*   **Control de Inflamación**: Se recomienda terapia de Raspado y Alisado Radicular (RAR) e irrigación con clorhexidina al 0.12%.\n\n¿Te gustaría que dictemos los siguientes registros por voz o emitamos el informe para el paciente? 📋`;
     }
 
     // 6. Precios / Cotizaciones de aranceles
@@ -718,27 +869,25 @@ He completado el análisis espectrográfico e interpretación semántica del arc
       let patientBudgetSection = "";
       if (activePatient) {
         const info = getPatientSummaryData();
-        patientBudgetSection = `\n\n💰 **Presupuesto del Paciente Activo (${activePatient.name})**:\n- **Monto Total Estimado**: $${info.totalPlanned.toLocaleString("es-CL")} CLP\n- Tratamientos completados: **${info.completedCount}** / Pendientes de pago: **${info.pendingCount}**.\n*Puedes pulsar el botón "Imprimir Presupuesto" en la vista del plan de tratamiento para exportarlo en PDF a tu paciente.*`;
+        patientBudgetSection = `\n\n💰 **Presupuesto Estimado de ${activePatient.name}**:\n- **Total Planificado**: $${info.totalPlanned.toLocaleString("es-CL")} CLP\n- Tratamientos listos: **${info.completedCount}** / Pendientes: **${info.pendingCount}**.\n*Puedes pulsar "Imprimir Presupuesto" en la ficha para entregárselo en PDF.*`;
       }
 
-      return `🪙 **Consultor de Aranceles Médicos de la Clínica**\n\nAquí tienes las tarifas y costos vigentes preestablecidos para cirugías e intervenciones periodontales:\n\n| Procedimiento Dental | Valor Configurado |\n| :--- | :--- |\n${rows}${patientBudgetSection}`;
+      return `🪙 **Tarifario y Aranceles de la Clínica** ✨\n\nAquí tienes la lista de valores de referencia configurados:\n\n| Procedimiento Dental | Valor Configurado |\n| :--- | :--- |\n${rows}${patientBudgetSection}`;
     }
 
     // 3. Knowledge Base
     for (const [key, def] of Object.entries(DENTITO_KNOWLEDGE)) {
       if (raw.includes(key) || raw.includes("que es " + key) || raw.includes("definicion de " + key)) {
-        return `📖 **${key.toUpperCase()}**: ${def}`;
+        return `📖 **${key.toUpperCase()}**: ${def}\n\n*¿Te gustaría profundizar en el protocolo clínico o ver casos relacionados?* ✨`;
       }
     }
 
     // 4. Chit Chat
-    if (raw.includes("hola") || raw.includes("buenos dias") || raw.includes("buenas tardes")) {
-      return `¡Hola doctor(a)! Soy **Dentito**, tu asistente clínico digital en PerioDash. Estoy conectado con el historial clínico y los datos del periodontograma de la consulta. ¿En qué te puedo asesorar hoy?
-      
-*Puedes pedirme cosas como: "Analizar paciente", "Citas hoy", "Clases de Angle", "Precios de la clínica" o examinar archivos de radiografías aquí abajo.*`;
+    if (raw.includes("hola") || raw.includes("buenos dias") || raw.includes("buenas tardes") || raw.includes("que tal") || raw.includes("buenas")) {
+      return `¡Hola doctor(a)! 👋 Soy **Dentito** 🦷✨, tu copiloto clínico en PerioDash. ¡Es un gusto saludarte! Estoy listo para ayudarte con el historial de pacientes, dictado de sondaje por voz, análisis periodontal o resolver cualquier consulta académica.\n\n¿En qué podemos trabajar juntos hoy?`;
     }
     if (raw.includes("chiste") || raw.includes("broma")) {
-      return "¿Por qué los dentistas se sienten solos? ¡Porque siempre están buscando un 'buen diente'! 🥁 Oye, ¿sabías que la bacteria *Porphyromonas gingivalis* es la enemiga número uno del periodonto? ¡Esa sí que no es un chiste para las encías de tus pacientes!";
+      return "¿Por qué los dentistas se sienten tan acompañados? ¡Porque siempre están rodeados de buenas raíces y excelentes coronas! 😄🥁 Oye, y hablando de cuidar raíces: recuerda que la higiene interproximal es la mejor amiga de tus pacientes. ¡Ánimo con la jornada clínica! 🦷✨";
     }
 
     return null;
@@ -772,50 +921,16 @@ He completado el análisis espectrográfico e interpretación semántica del arc
     }
 
     try {
-      // Compiled comprehensive context for Gemini API
-      let serialisedPatient = "";
-      if (activePatient) {
-        const stats = getPatientSummaryData();
-        serialisedPatient = JSON.stringify({
-          activeTab,
-          clinicalSubView,
-          doctorName,
-          clinicName,
-          totalPatientsInClinic: patients.length,
-          totalAppointmentsToday: appointments.length,
-          activePatient: {
-            id: activePatient.id,
-            name: activePatient.name,
-            phone: activePatient.phone,
-            email: activePatient.email,
-            birthdate: activePatient.birthdate,
-            notes: activePatient.notes,
-            anamnesis: activePatient.anamnesis,
-            simulatedCariesCount: stats.cariesCount,
-            simulatedCariesTeeth: stats.cariesTeeth,
-            simulatedMissingCount: stats.missingCount,
-            simulatedImplantCount: stats.implantCount,
-            simulatedEndoCount: stats.endoCount,
-            simulatedDeepPockets: stats.totalDeepPockets,
-            simulatedDeepPocketsTeeth: stats.deepPocketsList,
-            simulatedPlaqueIndex: stats.plaquePct,
-            treatmentBudgetTotal: stats.totalPlanned,
-            treatmentProceduresPending: stats.pendingCount,
-            evolutionsLogs: activePatient.evolutions?.map(e => ({ date: e.date, text: e.description })),
-            consentimientosLogs: activePatient.consentimientos?.map(c => ({ doc: c.documentType, signed: !!c.signature })),
-            xRaysLogs: activePatient.xRays?.map(x => ({ id: x.id, date: x.date, type: x.type, notes: x.notes }))
-          }
-        }, null, 2);
-      } else {
-        serialisedPatient = JSON.stringify({
-          activeTab,
-          clinicalSubView,
-          doctorName,
-          clinicName,
-          totalPatientsInClinic: patients.length,
-          totalAppointmentsToday: appointments.length,
-        }, null, 2);
-      }
+      // Compiled structured clinical context for Gemini API based on user settings
+      const payloadResult = buildStructuredClinicalPayload(activePatient, contextConfig, {
+        activeTab,
+        clinicalSubView,
+        doctorName,
+        clinicName,
+        totalPatients: patients.length,
+        totalAppointmentsToday: appointments.length,
+      });
+      const serialisedPatient = payloadResult.jsonString;
 
       const res = await fetch("/api/dentito", {
         method: "POST",
@@ -881,7 +996,20 @@ He completado el análisis espectrográfico e interpretación semántica del arc
         // Safe capture
       }
     };
-    recognition.onerror = () => setIsListening(false);
+    recognition.onerror = (e: any) => {
+      setIsListening(false);
+      if (e?.error === "not-allowed" || e?.error === "service-not-allowed") {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `bot-speech-err-${Date.now()}`,
+            role: "assistant",
+            content: "🤖 **Asistente Dentito**: El acceso al micrófono fue denegado en tu navegador. Por favor permite el acceso al micrófono en la barra de direcciones o ajustes para comunicarte por voz.",
+            createdAt: new Date().toISOString(),
+          }
+        ]);
+      }
+    };
     recognition.onend = () => setIsListening(false);
 
     try {
@@ -1214,8 +1342,480 @@ He completado el análisis espectrográfico e interpretación semántica del arc
               </div>
             </div>
 
+            {/* STRUCTURED CLINICAL CONTEXT BAR */}
+            <div 
+              className="px-3.5 py-1.5 border-b border-slate-200/70 dark:border-slate-800/80 bg-slate-50/80 dark:bg-slate-900/70 backdrop-blur-md flex items-center justify-between gap-2 shrink-0 select-none z-10"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Context Mode Selector Trigger */}
+              <div className="flex items-center gap-1.5 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setShowContextModal(true)}
+                  className="group flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/25 dark:border-teal-500/30 transition-all cursor-pointer text-left shadow-xs active:scale-95"
+                  title="Configurar qué información clínica y modo de contexto se envía al modelo de IA"
+                >
+                  <span className="w-2 h-2 rounded-full bg-teal-500 animate-pulse shrink-0" />
+                  <div className="flex items-center gap-1 truncate">
+                    <span className="text-[9.5px] uppercase tracking-wider font-bold text-teal-700 dark:text-teal-300">Modo:</span>
+                    <span className="text-[11px] font-semibold text-slate-800 dark:text-slate-100 truncate">
+                      {CONTEXT_MODES[contextConfig.mode]?.shortTitle || "Personalizado"}
+                    </span>
+                  </div>
+                  <SlidersHorizontal className="w-3 h-3 text-teal-600 dark:text-teal-400 shrink-0 ml-0.5" />
+                </button>
+
+                {/* Module indicators */}
+                <div className="hidden xs:flex items-center gap-1 text-[9px]">
+                  {contextConfig.includeAnamnesis && (
+                    <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono border border-slate-200/60 dark:border-slate-700" title="Ficha y Anamnesis incluida">Ficha</span>
+                  )}
+                  {contextConfig.includeOdontogram && (
+                    <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono border border-slate-200/60 dark:border-slate-700" title="Odontograma Anatómico incluido">Odonto</span>
+                  )}
+                  {contextConfig.includePeriodontogram && (
+                    <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono border border-slate-200/60 dark:border-slate-700" title="Periodontograma 6 puntos incluido">Perio</span>
+                  )}
+                  {contextConfig.includeTreatmentPlan && (
+                    <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono border border-slate-200/60 dark:border-slate-700" title="Presupuesto y Tratamiento incluido">Plan</span>
+                  )}
+                  {contextConfig.includeEvolutions && (
+                    <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono border border-slate-200/60 dark:border-slate-700" title="Evoluciones Clínicas incluidas">Evol</span>
+                  )}
+                  {contextConfig.maskPII && (
+                    <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono border border-emerald-500/20" title="Protección de datos personales (PII Enmascarado)">PII 🛡️</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Right actions: Inspection & Settings */}
+              <div className="flex items-center gap-1 shrink-0">
+                {canInspectPayload && (
+                  <>
+                    <span className="hidden sm:inline-block text-[9px] font-mono text-slate-400 dark:text-slate-500" title="Tamaño aproximado del contexto clínico enviado a la IA (Vista Auditoría Admin)">
+                      ~{liveContextPayload.estimatedTokens} tok
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowContextInspector(true)}
+                      className="p-1.5 rounded-lg bg-teal-500/10 hover:bg-teal-500/20 text-teal-600 dark:text-teal-400 transition-colors cursor-pointer border border-teal-500/25"
+                      title="Auditoría de Payload JSON (Solo Administrador / HIPAA)"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setShowContextModal(true)}
+                  className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-teal-500/15 hover:text-teal-600 dark:hover:text-teal-400 text-slate-500 dark:text-slate-400 transition-colors cursor-pointer border border-slate-200/60 dark:border-slate-700"
+                  title="Configurar opciones del contexto clínico"
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
             {/* Wrapper for scrollable pane and sticky overlay to avoid previous messages overlapping */}
             <div className="flex-1 min-h-0 relative flex flex-col">
+              {/* MODAL: CONFIGURACIÓN DE CONTEXTO ESTRUCTURADO */}
+              <AnimatePresence>
+                {showContextModal && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.98 }}
+                    transition={{ duration: 0.16 }}
+                    className="absolute inset-0 z-50 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl flex flex-col overflow-hidden rounded-b-[2rem] text-slate-800 dark:text-slate-100"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* Modal Header */}
+                    <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/70 dark:bg-slate-900/60">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-xl bg-teal-500/15 flex items-center justify-center text-teal-600 dark:text-teal-400 border border-teal-500/30">
+                          <SlidersHorizontal className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <h3 className="font-display font-bold text-xs uppercase tracking-wider text-slate-900 dark:text-white">
+                            Modos de Contexto Clínico
+                          </h3>
+                          <p className="text-[9.5px] text-slate-500 dark:text-slate-400">
+                            Personaliza la información transmitida al modelo de IA
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowContextModal(false)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer border-0 bg-transparent"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {/* Modal Scrollable Body */}
+                    <div className="flex-1 overflow-y-auto p-3.5 space-y-3.5 text-xs hide-scrollbar">
+                      {/* Presets Grid */}
+                      <div>
+                        <label className="font-display font-bold text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500 block mb-1.5">
+                          1. Modos de Flujo de Trabajo Clínico
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {(Object.values(CONTEXT_MODES) as ContextModeOption[]).map((mode) => {
+                            const isActive = contextConfig.mode === mode.id;
+                            return (
+                              <button
+                                key={mode.id}
+                                type="button"
+                                onClick={() => handleSelectContextMode(mode.id)}
+                                className={`p-2.5 rounded-2xl text-left border transition-all cursor-pointer flex flex-col gap-1 relative ${
+                                  isActive
+                                    ? "bg-teal-500/10 border-teal-500 dark:border-teal-400 shadow-sm shadow-teal-500/10"
+                                    : "bg-slate-50/70 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800/80 border-slate-200/70 dark:border-slate-800"
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className={`text-[8.5px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${mode.badgeColor}`}>
+                                    {mode.badge}
+                                  </span>
+                                  {isActive && (
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-teal-500 shrink-0" />
+                                  )}
+                                </div>
+                                <div>
+                                  <h4 className="font-bold text-[11px] text-slate-900 dark:text-white leading-tight">
+                                    {mode.title}
+                                  </h4>
+                                  <p className="text-[9.5px] text-slate-500 dark:text-slate-400 leading-snug mt-0.5 line-clamp-2">
+                                    {mode.description}
+                                  </p>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Granular Module Toggles */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="font-display font-bold text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                            2. Información Clínica Incluida (Configuración Granular)
+                          </label>
+                          {contextConfig.mode !== "custom" && (
+                            <span className="text-[8.5px] text-teal-600 dark:text-teal-400 font-medium">
+                              (Modificar ajustará a 'Personalizado')
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="space-y-1 bg-slate-50/70 dark:bg-slate-900/40 p-2 rounded-2xl border border-slate-200/60 dark:border-slate-800">
+                          {/* Ficha / Anamnesis */}
+                          <div 
+                            onClick={() => handleToggleModule("includeAnamnesis")}
+                            className="flex items-center justify-between p-2 rounded-xl hover:bg-white dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
+                          >
+                            <div className="flex items-center gap-2">
+                              <FileText className="w-3.5 h-3.5 text-teal-500 shrink-0" />
+                              <div>
+                                <span className="font-bold text-[10.5px] text-slate-800 dark:text-slate-200 block">
+                                  Ficha Médica & Anamnesis
+                                </span>
+                                <span className="text-[9px] text-slate-400 dark:text-slate-500 block">
+                                  Alergias, alertas críticas, patologías sistémicas (HTA, diabetes), tabaquismo y fármacos.
+                                </span>
+                              </div>
+                            </div>
+                            <input 
+                              type="checkbox" 
+                              checked={contextConfig.includeAnamnesis} 
+                              onChange={() => {}}
+                              className="w-3.5 h-3.5 accent-teal-500 cursor-pointer pointer-events-none shrink-0" 
+                            />
+                          </div>
+
+                          {/* Odontograma */}
+                          <div 
+                            onClick={() => handleToggleModule("includeOdontogram")}
+                            className="flex items-center justify-between p-2 rounded-xl hover:bg-white dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Grid className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                              <div>
+                                <span className="font-bold text-[10.5px] text-slate-800 dark:text-slate-200 block">
+                                  Odontograma Anatómico FDI
+                                </span>
+                                <span className="text-[9px] text-slate-400 dark:text-slate-500 block">
+                                  Dientes con caries y caras anatómicas (V, O, L, M, D), ausencias, endodoncias e implantes.
+                                </span>
+                              </div>
+                            </div>
+                            <input 
+                              type="checkbox" 
+                              checked={contextConfig.includeOdontogram} 
+                              onChange={() => {}}
+                              className="w-3.5 h-3.5 accent-teal-500 cursor-pointer pointer-events-none shrink-0" 
+                            />
+                          </div>
+
+                          {/* Periodontograma */}
+                          <div 
+                            onClick={() => handleToggleModule("includePeriodontogram")}
+                            className="flex items-center justify-between p-2 rounded-xl hover:bg-white dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Activity className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                              <div>
+                                <span className="font-bold text-[10.5px] text-slate-800 dark:text-slate-200 block">
+                                  Periodontograma Biométrico (6 Puntos)
+                                </span>
+                                <span className="text-[9px] text-slate-400 dark:text-slate-500 block">
+                                  Sondaje 6 puntos (PPD, REC, CAL), sangrado BOP %, O'Leary, riesgo PRA y AAP/EFP 2018.
+                                </span>
+                              </div>
+                            </div>
+                            <input 
+                              type="checkbox" 
+                              checked={contextConfig.includePeriodontogram} 
+                              onChange={() => {}}
+                              className="w-3.5 h-3.5 accent-teal-500 cursor-pointer pointer-events-none shrink-0" 
+                            />
+                          </div>
+
+                          {/* Presupuesto & Tratamiento */}
+                          <div 
+                            onClick={() => handleToggleModule("includeTreatmentPlan")}
+                            className="flex items-center justify-between p-2 rounded-xl hover:bg-white dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Database className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                              <div>
+                                <span className="font-bold text-[10.5px] text-slate-800 dark:text-slate-200 block">
+                                  Plan de Tratamiento & Presupuestos
+                                </span>
+                                <span className="text-[9px] text-slate-400 dark:text-slate-500 block">
+                                  Procedimientos planificados, estado de avance (completado/pendiente) y costos.
+                                </span>
+                              </div>
+                            </div>
+                            <input 
+                              type="checkbox" 
+                              checked={contextConfig.includeTreatmentPlan} 
+                              onChange={() => {}}
+                              className="w-3.5 h-3.5 accent-teal-500 cursor-pointer pointer-events-none shrink-0" 
+                            />
+                          </div>
+
+                          {/* Evoluciones Clínicas */}
+                          <div 
+                            onClick={() => handleToggleModule("includeEvolutions")}
+                            className="flex items-center justify-between p-2 rounded-xl hover:bg-white dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
+                          >
+                            <div className="flex items-center gap-2">
+                              <FileEdit className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                              <div>
+                                <span className="font-bold text-[10.5px] text-slate-800 dark:text-slate-200 block">
+                                  Evoluciones y Notas Clínicas Previas
+                                </span>
+                                <span className="text-[9px] text-slate-400 dark:text-slate-500 block">
+                                  Historial de notas de evolución para redactar SOAP continuos y dar seguimiento.
+                                </span>
+                              </div>
+                            </div>
+                            <input 
+                              type="checkbox" 
+                              checked={contextConfig.includeEvolutions} 
+                              onChange={() => {}}
+                              className="w-3.5 h-3.5 accent-teal-500 cursor-pointer pointer-events-none shrink-0" 
+                            />
+                          </div>
+
+                          {/* Radiografías */}
+                          <div 
+                            onClick={() => handleToggleModule("includeXRays")}
+                            className="flex items-center justify-between p-2 rounded-xl hover:bg-white dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Layers className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+                              <div>
+                                <span className="font-bold text-[10.5px] text-slate-800 dark:text-slate-200 block">
+                                  Radiografías Digitales & Estudios
+                                </span>
+                                <span className="text-[9px] text-slate-400 dark:text-slate-500 block">
+                                  Estudios radiográficos registrados (panorámica, periapical) y notas diagnósticas.
+                                </span>
+                              </div>
+                            </div>
+                            <input 
+                              type="checkbox" 
+                              checked={contextConfig.includeXRays} 
+                              onChange={() => {}}
+                              className="w-3.5 h-3.5 accent-teal-500 cursor-pointer pointer-events-none shrink-0" 
+                            />
+                          </div>
+
+                          {/* Privacy PII Masking */}
+                          <div 
+                            onClick={() => handleToggleModule("maskPII")}
+                            className="flex items-center justify-between p-2 rounded-xl bg-teal-500/5 dark:bg-teal-950/20 border border-teal-500/20 hover:bg-teal-500/10 transition-colors cursor-pointer"
+                          >
+                            <div className="flex items-center gap-2">
+                              <ShieldCheck className="w-3.5 h-3.5 text-teal-500 shrink-0" />
+                              <div>
+                                <span className="font-bold text-[10.5px] text-teal-800 dark:text-teal-200 flex items-center gap-1.5">
+                                  <span>Enmascarar PII / PHI (Privacy by Design)</span>
+                                  <span className="text-[7.5px] uppercase tracking-wider bg-teal-500/20 text-teal-700 dark:text-teal-300 font-mono px-1 py-0.2 rounded">HIPAA</span>
+                                </span>
+                                <span className="text-[9px] text-slate-500 dark:text-slate-400 block">
+                                  Oculta RUT/DNI, teléfono y correo electrónico personal al transmitir al modelo.
+                                </span>
+                              </div>
+                            </div>
+                            <input 
+                              type="checkbox" 
+                              checked={contextConfig.maskPII} 
+                              onChange={() => {}}
+                              className="w-3.5 h-3.5 accent-teal-500 cursor-pointer pointer-events-none shrink-0" 
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Live Metrics Summary: Clinical status for regular users, technical audit for admins */}
+                      {canInspectPayload ? (
+                        <div className="p-2.5 rounded-2xl bg-slate-100/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-[10px]">
+                          <div className="space-y-0.5">
+                            <span className="text-slate-400 font-mono block">Auditoría Técnica de Payload (Admin):</span>
+                            <span className="font-bold text-slate-800 dark:text-slate-100">
+                              {liveContextPayload.activeModulesCount} módulos • {liveContextPayload.characterCount} chars (~{liveContextPayload.estimatedTokens} tok)
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowContextInspector(true)}
+                            className="px-2.5 py-1.5 bg-white dark:bg-slate-800 hover:bg-teal-50 dark:hover:bg-teal-950/50 text-teal-600 dark:text-teal-400 font-bold rounded-xl border border-slate-200 dark:border-slate-700 transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>Ver Payload JSON</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="p-2.5 rounded-2xl bg-teal-500/10 dark:bg-teal-950/30 border border-teal-500/20 flex items-center justify-between text-[10px]">
+                          <div className="flex items-center gap-2">
+                            <ShieldCheck className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
+                            <div>
+                              <span className="font-bold text-teal-900 dark:text-teal-200 block">
+                                Contexto Clínico Activo y Protegido
+                              </span>
+                              <span className="text-[9px] text-teal-700/80 dark:text-teal-300/80">
+                                {liveContextPayload.activeModulesCount} módulos habilitados • Cifrado y optimizado para la atención
+                              </span>
+                            </div>
+                          </div>
+                          <span className="text-[8.5px] uppercase tracking-wider bg-teal-500/20 text-teal-800 dark:text-teal-200 font-mono px-2 py-0.5 rounded-full font-bold">
+                            Protegido
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Modal Footer */}
+                    <div className="px-4 py-2.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 flex items-center justify-between shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setContextConfig(DEFAULT_CONTEXT_CONFIG)}
+                        className="text-[10px] text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 font-medium cursor-pointer border-0 bg-transparent"
+                      >
+                        Restablecer
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowContextModal(false)}
+                        className="px-4 py-1.5 bg-teal-500 hover:bg-teal-600 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-teal-500/20 cursor-pointer border-0"
+                      >
+                        Aplicar y Cerrar
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* MODAL: INSPECTOR DE JSON DE CONTEXTO CLÍNICO (Exclusivo para Administrador / Auditoría HIPAA) */}
+              <AnimatePresence>
+                {canInspectPayload && showContextInspector && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.97 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.97 }}
+                    transition={{ duration: 0.16 }}
+                    className="absolute inset-0 z-50 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl flex flex-col overflow-hidden rounded-b-[2rem] text-slate-800 dark:text-slate-100"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/70 dark:bg-slate-900/60">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-xl bg-teal-500/15 flex items-center justify-center text-teal-600 dark:text-teal-400 border border-teal-500/30">
+                          <Eye className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <h3 className="font-display font-bold text-xs uppercase tracking-wider text-slate-900 dark:text-white">
+                              Inspector de Contexto Clínico
+                            </h3>
+                            <span className="text-[7.5px] font-mono uppercase tracking-wider px-1.5 py-0.5 bg-amber-500/20 text-amber-700 dark:text-amber-300 rounded border border-amber-500/30 font-bold">
+                              Admin / Auditoría
+                            </span>
+                          </div>
+                          <span className="text-[9.5px] text-slate-500 dark:text-slate-400">
+                            Payload JSON transmitido a Gemini ({liveContextPayload.characterCount} caracteres)
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await copyToClipboardSafely(liveContextPayload.jsonString);
+                            setCopiedPayload(true);
+                            setTimeout(() => setCopiedPayload(false), 2000);
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-teal-500/10 hover:bg-teal-500/20 text-teal-700 dark:text-teal-300 font-medium text-[9.5px] flex items-center gap-1 cursor-pointer transition-colors border border-teal-500/20"
+                        >
+                          {copiedPayload ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedPayload ? "Copiado" : "Copiar JSON"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowContextInspector(false)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors cursor-pointer border-0 bg-transparent"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-3.5 hide-scrollbar">
+                      <pre className="text-[9.5px] font-mono leading-relaxed bg-slate-900 text-teal-300 p-3.5 rounded-2xl overflow-x-auto shadow-inner border border-slate-800 select-all">
+                        {liveContextPayload.jsonString}
+                      </pre>
+                    </div>
+
+                    <div className="px-4 py-2 border-t border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 flex items-center justify-between text-[10px]">
+                      <span className="text-slate-500">
+                        Modo activo: <strong className="text-teal-600 dark:text-teal-400">{CONTEXT_MODES[contextConfig.mode]?.title || "Personalizado"}</strong>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowContextInspector(false)}
+                        className="px-3 py-1 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl cursor-pointer transition-colors border-0"
+                      >
+                        Cerrar
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
               {/* HOLOGRAPHIC SCANNER ANIMATION */}
               {isAnalyzingFile && (
                 <div className="absolute inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-white font-mono rounded-b-[2rem] sm:rounded-b-[2.5rem]">
@@ -1282,8 +1882,8 @@ He completado el análisis espectrográfico e interpretación semántica del arc
                           : "bg-teal-500 text-white rounded-tr-sm font-medium shadow-md shadow-teal-500/20 border border-teal-400 whitespace-pre-wrap"
                       }`}>
                         {isBot ? (
-                          <div className="markdown-body text-slate-800 dark:text-slate-100 [&_p]:mb-2.5 [&_p]:last-child:mb-0 [&_p]:leading-relaxed [&_p]:text-slate-800 dark:[&_p]:text-slate-100 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-3 [&_ul]:text-slate-800 dark:[&_ul]:text-slate-100 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:mb-3 [&_ol]:text-slate-800 dark:[&_ol]:text-slate-100 [&_li]:mb-1.5 [&_li]:text-slate-800 dark:[&_li]:text-slate-100 [&_table]:w-full [&_table]:my-4 [&_table]:border-collapse [&_table]:text-[11px] [&_table]:text-slate-800 dark:[&_table]:text-slate-100 [&_th]:border [&_th]:border-slate-300 dark:[&_th]:border-slate-600 [&_th]:p-2 [&_th]:bg-slate-100 dark:[&_th]:bg-slate-900/60 [&_th]:font-bold [&_th]:text-slate-900 dark:[&_th]:text-white [&_th]:text-left [&_td]:border [&_td]:border-slate-200 dark:[&_td]:border-slate-700 [&_td]:p-2 [&_td]:text-slate-800 dark:[&_td]:text-slate-100 [&_blockquote]:border-l-4 [&_blockquote]:border-teal-500 [&_blockquote]:pl-3 [&_blockquote]:py-2 [&_blockquote]:italic [&_blockquote]:bg-slate-500/5 dark:[&_blockquote]:bg-white/5 [&_blockquote]:text-slate-700 dark:[&_blockquote]:text-slate-200 [&_blockquote]:rounded-r-lg [&_blockquote]:my-3 [&_h1]:text-sm [&_h1]:font-black [&_h1]:mt-4 [&_h1]:mb-2 [&_h1]:text-teal-800 dark:[&_h1]:text-teal-300 [&_h2]:text-xs [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-1.5 [&_h2]:text-teal-700 dark:[&_h2]:text-teal-300 [&_h3]:font-bold [&_h3]:mt-2 [&_h3]:mb-1 [&_strong]:text-teal-700 dark:[&_strong]:text-teal-300 [&_strong]:font-bold [&_strong]:tracking-tight">
-                            <Markdown>{m.content}</Markdown>
+                          <div className="markdown-body text-slate-800 dark:text-slate-100 [&_p]:mb-2.5 [&_p]:last-child:mb-0 [&_p]:leading-relaxed [&_p]:text-slate-800 dark:[&_p]:text-slate-100 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-3 [&_ul]:text-slate-800 dark:[&_ul]:text-slate-100 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:mb-3 [&_ol]:text-slate-800 dark:[&_ol]:text-slate-100 [&_li]:mb-1.5 [&_li]:text-slate-800 dark:[&_li]:text-slate-100 [&_table]:w-full [&_table]:my-3 [&_table]:border-collapse [&_table]:text-[11px] [&_table]:rounded-xl [&_table]:overflow-hidden [&_th]:p-2.5 [&_th]:bg-teal-50 dark:[&_th]:bg-teal-950/60 [&_th]:font-bold [&_th]:text-teal-900 dark:[&_th]:text-teal-200 [&_th]:border [&_th]:border-teal-200 dark:[&_th]:border-teal-900/60 [&_th]:text-left [&_td]:p-2.5 [&_td]:border [&_td]:border-slate-200 dark:[&_td]:border-slate-700/80 [&_td]:text-slate-800 dark:[&_td]:text-slate-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded-md [&_code]:bg-teal-50 dark:[&_code]:bg-teal-950/50 [&_code]:text-teal-700 dark:[&_code]:text-teal-300 [&_code]:font-mono [&_code]:text-[10px] [&_blockquote]:border-l-4 [&_blockquote]:border-teal-500 [&_blockquote]:pl-3 [&_blockquote]:py-2 [&_blockquote]:italic [&_blockquote]:bg-slate-500/5 dark:[&_blockquote]:bg-white/5 [&_blockquote]:text-slate-700 dark:[&_blockquote]:text-slate-200 [&_blockquote]:rounded-r-lg [&_blockquote]:my-3 [&_h1]:text-sm [&_h1]:font-black [&_h1]:mt-4 [&_h1]:mb-2 [&_h1]:text-teal-800 dark:[&_h1]:text-teal-300 [&_h2]:text-xs [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-1.5 [&_h2]:text-teal-700 dark:[&_h2]:text-teal-300 [&_h3]:font-bold [&_h3]:mt-2 [&_h3]:mb-1 [&_strong]:text-teal-700 dark:[&_strong]:text-teal-300 [&_strong]:font-bold [&_strong]:tracking-tight">
+                            <Markdown remarkPlugins={[remarkGfm]}>{m.content}</Markdown>
                           </div>
                         ) : (
                           m.content
@@ -1410,33 +2010,78 @@ He completado el análisis espectrográfico e interpretación semántica del arc
                 </div>
               )}
 
-              <div className="flex gap-2 mb-3 px-1 overflow-x-auto hide-scrollbar max-w-full">
-                <button onClick={() => handleSendMessage("Explícanos en profundidad la clasificación de periodontitis (Estadios y Grados) según el Consenso AAP/EFP 2018.")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-teal-500/10 border border-teal-500/20 text-teal-600 dark:text-teal-400 hover:bg-teal-500/20 transition-colors cursor-pointer flex items-center gap-1">
-                  📚 Periodoncia AAP 2018
+              {/* Carousel de sugerencias rápidas con flechas de navegación izquierda y derecha */}
+              <div className="relative flex items-center gap-1.5 mb-2.5 max-w-full">
+                <button 
+                  type="button"
+                  onClick={() => scrollChips("left")}
+                  className="shrink-0 p-1.5 rounded-full bg-white/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-teal-600 dark:hover:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/60 shadow-xs active:scale-90 transition-all cursor-pointer z-10 flex items-center justify-center"
+                  title="Ver sugerencias anteriores"
+                  aria-label="Desplazar a la izquierda"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
                 </button>
-                <button onClick={() => handleSendMessage("Cuáles son los criterios clínicos del sistema ICDAS para evaluar el nivel de avance de caries?")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/20 transition-colors cursor-pointer flex items-center gap-1">
-                  🔍 Caries (ICDAS)
-                </button>
-                <button onClick={() => handleSendMessage("Explica las clases de Angle de oclusión y la diferencia entre trauma oclusal primario y secundario.")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors cursor-pointer flex items-center gap-1">
-                  ⚖️ Oclusión y Angle
-                </button>
-                <button onClick={() => handleSendMessage("En prótesis removible, detallame la clasificación de Kennedy y las reglas de Applegate.")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 transition-colors cursor-pointer flex items-center gap-1">
-                  🦷 Prótesis (Kennedy)
-                </button>
-                <button onClick={() => handleSendMessage("¿Cuáles son los signos y el manejo de Alveolitis seca frente al de Alveolitis húmeda?")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors cursor-pointer flex items-center gap-1">
-                  🩸 Alveolitis Seca vs Húmeda
-                </button>
-                <button onClick={() => handleSendMessage("Qué diferencia hay entre una Pulpotomía y una Pulpectomía en Odontopediatría?")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-pink-500/10 border border-pink-500/20 text-pink-600 dark:text-pink-400 hover:bg-pink-500/20 transition-colors cursor-pointer flex items-center gap-1">
-                  👶 Odontopediatría
-                </button>
-                <button onClick={() => handleSendMessage("Cuál es el protocolo de profilaxis para endocarditis infecciosa y qué antibióticos alternativos darías en alérgicos?")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 transition-colors cursor-pointer flex items-center gap-1">
-                  💊 Profilaxis
-                </button>
-                <button onClick={() => handleSendMessage("Cómo diagnostico una Leucoplasia Oral y qué precauciones de malignidad debo tomar?")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 transition-colors cursor-pointer flex items-center gap-1">
-                  🔬 Patología Oral
-                </button>
-                <button onClick={() => setEmergencyMode("selector")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20 transition-colors cursor-pointer flex items-center gap-1">
-                  🚨 Protocolos de Emergencia
+
+                <div 
+                  ref={chipsScrollRef}
+                  className="flex gap-2 py-1 overflow-x-auto select-none touch-pan-x scroll-smooth hide-scrollbar flex-1 items-center"
+                >
+                  {/* Mode-specific suggested prompts dynamically highlighted */}
+                  {(CONTEXT_MODES[contextConfig.mode]?.suggestedPrompts || []).map((promptText, idx) => (
+                    <button
+                      key={`mode-prompt-${idx}`}
+                      onClick={() => handleSendMessage(promptText)}
+                      className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-teal-500/20 dark:bg-teal-500/25 border border-teal-500/40 text-teal-800 dark:text-teal-200 hover:bg-teal-500/35 active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                      title={promptText}
+                    >
+                      <Sparkles className="w-3 h-3 text-teal-600 dark:text-teal-300 shrink-0" />
+                      <span className="truncate max-w-[200px]">{promptText}</span>
+                    </button>
+                  ))}
+
+                  <button onClick={() => handleSendMessage("¿Cuáles son los comandos de voz y cómo dicto en el periodontograma?")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-teal-500/15 border border-teal-500/30 text-teal-700 dark:text-teal-300 hover:bg-teal-500/25 active:scale-95 transition-all cursor-pointer flex items-center gap-1">
+                    🎙️ Comandos por Voz
+                  </button>
+                  <button onClick={() => handleSendMessage("Analizar paciente activo")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/25 active:scale-95 transition-all cursor-pointer flex items-center gap-1">
+                    📊 Resumen del Paciente
+                  </button>
+                  <button onClick={() => handleSendMessage("Explícanos en profundidad la clasificación de periodontitis (Estadios y Grados) según el Consenso AAP/EFP 2018.")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-teal-500/10 border border-teal-500/20 text-teal-600 dark:text-teal-400 hover:bg-teal-500/20 active:scale-95 transition-all cursor-pointer flex items-center gap-1">
+                    📚 Periodoncia AAP 2018
+                  </button>
+                  <button onClick={() => handleSendMessage("Cuáles son los criterios clínicos del sistema ICDAS para evaluar el nivel de avance de caries?")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/20 active:scale-95 transition-all cursor-pointer flex items-center gap-1">
+                    🔍 Caries (ICDAS)
+                  </button>
+                  <button onClick={() => handleSendMessage("Explica las clases de Angle de oclusión y la diferencia entre trauma oclusal primario y secundario.")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 active:scale-95 transition-all cursor-pointer flex items-center gap-1">
+                    ⚖️ Oclusión y Angle
+                  </button>
+                  <button onClick={() => handleSendMessage("En prótesis removible, detallame la clasificación de Kennedy y las reglas de Applegate.")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 active:scale-95 transition-all cursor-pointer flex items-center gap-1">
+                    🦷 Prótesis (Kennedy)
+                  </button>
+                  <button onClick={() => handleSendMessage("¿Cuáles son los signos y el manejo de Alveolitis seca frente al de Alveolitis húmeda?")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 active:scale-95 transition-all cursor-pointer flex items-center gap-1">
+                    🩸 Alveolitis Seca vs Húmeda
+                  </button>
+                  <button onClick={() => handleSendMessage("Qué diferencia hay entre una Pulpotomía y una Pulpectomía en Odontopediatría?")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-pink-500/10 border border-pink-500/20 text-pink-600 dark:text-pink-400 hover:bg-pink-500/20 active:scale-95 transition-all cursor-pointer flex items-center gap-1">
+                    👶 Odontopediatría
+                  </button>
+                  <button onClick={() => handleSendMessage("Cuál es el protocolo de profilaxis para endocarditis infecciosa y qué antibióticos alternativos darías en alérgicos?")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 active:scale-95 transition-all cursor-pointer flex items-center gap-1">
+                    💊 Profilaxis
+                  </button>
+                  <button onClick={() => handleSendMessage("Cómo diagnostico una Leucoplasia Oral y qué precauciones de malignidad debo tomar?")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 active:scale-95 transition-all cursor-pointer flex items-center gap-1">
+                    🔬 Patología Oral
+                  </button>
+                  <button onClick={() => setEmergencyMode("selector")} className="shrink-0 text-[10px] font-bold tracking-wide px-3 py-1.5 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20 active:scale-95 transition-all cursor-pointer flex items-center gap-1">
+                    🚨 Protocolos de Emergencia
+                  </button>
+                </div>
+
+                <button 
+                  type="button"
+                  onClick={() => scrollChips("right")}
+                  className="shrink-0 p-1.5 rounded-full bg-white/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-teal-600 dark:hover:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/60 shadow-xs active:scale-90 transition-all cursor-pointer z-10 flex items-center justify-center"
+                  title="Ver más sugerencias"
+                  aria-label="Desplazar a la derecha"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
                 </button>
               </div>
 

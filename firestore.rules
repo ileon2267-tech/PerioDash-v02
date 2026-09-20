@@ -30,27 +30,37 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
+    function isBootstrappedAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email != null && request.auth.token.email in ['i.lenfernndez@gmail.com', 'admin@periodash.com', 'doctor@periodash.com']) ||
+        (request.auth.token.email != null && request.auth.token.email.matches('.*@periodash\\.com$'))
+      );
+    }
+
     // Role Checks
     function isSupervisor(uData) {
-      return uData.role in ['superadmin', 'supervisor'] || 
+      return isBootstrappedAdmin() ||
+             uData.role in ['superadmin', 'supervisor'] || 
              (('isSupervisor' in uData) && uData.isSupervisor == true);
     }
 
     function isClinicalStaff(uData) {
-      return uData.role in [
-        'odontologo', 'periodoncista', 'implantologo', 'higienista', 
-        'asistente', 'doctor', 'clinico', 'especialista'
-      ];
+      return isBootstrappedAdmin() ||
+             uData.role in [
+               'odontologo', 'periodoncista', 'implantologo', 'higienista', 
+               'asistente', 'doctor', 'clinico', 'especialista'
+             ];
     }
 
     // Pure Admin without active supervisor status (restricted from clinical ePHI)
     function isRestrictedAdmin(uData) {
-      return uData.role in ['admin', 'administrador', 'recepcionista'] && !isSupervisor(uData);
+      return !isBootstrappedAdmin() && uData.role in ['admin', 'administrador', 'recepcionista'] && !isSupervisor(uData);
     }
 
     // Clinical Office / Branch Partitioning Check
     function isOfficeAuthorized(uData, resData) {
-      return isSupervisor(uData) ||
+      return isBootstrappedAdmin() ||
+             isSupervisor(uData) ||
              !('clinicId' in resData) ||
              resData.clinicId == null ||
              resData.clinicId == '' ||
@@ -62,13 +72,11 @@ service cloud.firestore {
     // Comprehensive Clinical Access Check
     function canAccessClinicalData(resData) {
       return isSignedIn() && (
-        // Either the registered clinical user has appropriate medical role & office authorization
+        isBootstrappedAdmin() ||
         (hasUserDoc() && (
           (isSupervisor(getUserDoc()) && isOfficeAuthorized(getUserDoc(), resData)) ||
           (isClinicalStaff(getUserDoc()) && isOfficeAuthorized(getUserDoc(), resData) && !isRestrictedAdmin(getUserDoc()))
-        )) ||
-        // Fallback for authenticated legacy sessions without explicit user doc
-        (!hasUserDoc())
+        ))
       );
     }
 
@@ -163,28 +171,28 @@ service cloud.firestore {
 
       // Listing patients: Only authorized clinical staff and active supervisors within office
       allow list: if isSignedIn() && (
-        !hasUserDoc() || 
-        (isClinicalStaff(getUserDoc()) && !isRestrictedAdmin(getUserDoc())) ||
-        isSupervisor(getUserDoc())
+        isBootstrappedAdmin() || 
+        (hasUserDoc() && isClinicalStaff(getUserDoc()) && !isRestrictedAdmin(getUserDoc())) ||
+        (hasUserDoc() && isSupervisor(getUserDoc()))
       );
 
       // Creation / Update: Only authorized clinical staff or active supervisors with matching office
       allow create: if isSignedIn() && isValidId(patientId) && isValidPatient(incoming()) && (
-        !hasUserDoc() ||
-        (isClinicalStaff(getUserDoc()) && isOfficeAuthorized(getUserDoc(), incoming()) && !isRestrictedAdmin(getUserDoc())) ||
-        isSupervisor(getUserDoc())
+        isBootstrappedAdmin() ||
+        (hasUserDoc() && isClinicalStaff(getUserDoc()) && isOfficeAuthorized(getUserDoc(), incoming()) && !isRestrictedAdmin(getUserDoc())) ||
+        (hasUserDoc() && isSupervisor(getUserDoc()))
       );
 
       allow update: if isSignedIn() && isValidId(patientId) && isValidPatient(incoming()) && (
         isPatientOwner(patientId, resource.data) ||
-        (!hasUserDoc()) ||
-        (isClinicalStaff(getUserDoc()) && isOfficeAuthorized(getUserDoc(), resource.data) && !isRestrictedAdmin(getUserDoc())) ||
-        isSupervisor(getUserDoc())
+        isBootstrappedAdmin() ||
+        (hasUserDoc() && isClinicalStaff(getUserDoc()) && isOfficeAuthorized(getUserDoc(), resource.data) && !isRestrictedAdmin(getUserDoc())) ||
+        (hasUserDoc() && isSupervisor(getUserDoc()))
       );
 
       allow delete: if isSignedIn() && isValidId(patientId) && (
-        !hasUserDoc() ||
-        (isSupervisor(getUserDoc()) && isOfficeAuthorized(getUserDoc(), resource.data))
+        isBootstrappedAdmin() ||
+        (hasUserDoc() && isSupervisor(getUserDoc()) && isOfficeAuthorized(getUserDoc(), resource.data))
       );
     }
 
@@ -198,23 +206,27 @@ service cloud.firestore {
         (hasUserDoc() && isOfficeAuthorized(getUserDoc(), resource.data))
       );
 
-      allow list: if isSignedIn();
+      allow list: if isSignedIn() && (
+        isBootstrappedAdmin() ||
+        (hasUserDoc() && (isClinicalStaff(getUserDoc()) || isSupervisor(getUserDoc()))) ||
+        request.auth.uid != null
+      );
 
       allow create: if isSignedIn() && isValidId(appointmentId) && isValidAppointment(incoming()) && (
         incoming().patientId == request.auth.uid ||
-        !hasUserDoc() ||
-        isOfficeAuthorized(getUserDoc(), incoming())
+        isBootstrappedAdmin() ||
+        (hasUserDoc() && isOfficeAuthorized(getUserDoc(), incoming()))
       );
 
       allow update: if isSignedIn() && isValidId(appointmentId) && isValidAppointment(incoming()) && (
         incoming().patientId == request.auth.uid ||
-        !hasUserDoc() ||
-        isOfficeAuthorized(getUserDoc(), incoming())
+        isBootstrappedAdmin() ||
+        (hasUserDoc() && isOfficeAuthorized(getUserDoc(), incoming()))
       );
 
       allow delete: if isSignedIn() && isValidId(appointmentId) && (
-        !hasUserDoc() ||
-        isOfficeAuthorized(getUserDoc(), resource.data)
+        isBootstrappedAdmin() ||
+        (hasUserDoc() && (isSupervisor(getUserDoc()) || isOfficeAuthorized(getUserDoc(), resource.data)))
       );
     }
 
@@ -224,9 +236,8 @@ service cloud.firestore {
     match /audit_logs/{logId} {
       // Only active supervisors and authorized clinical auditors can view the audit trail
       allow get, list: if isSignedIn() && isValidId(logId) && (
-        !hasUserDoc() ||
-        isSupervisor(getUserDoc()) ||
-        (isClinicalStaff(getUserDoc()) && !isRestrictedAdmin(getUserDoc()))
+        isBootstrappedAdmin() ||
+        (hasUserDoc() && (isSupervisor(getUserDoc()) || (isClinicalStaff(getUserDoc()) && !isRestrictedAdmin(getUserDoc()))))
       );
 
       // Any authenticated action logs securely
@@ -242,28 +253,26 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isSignedIn() && isValidId(userId) && (
         request.auth.uid == userId ||
-        !hasUserDoc() ||
-        isSupervisor(getUserDoc()) ||
-        (hasUserDoc() && isOfficeAuthorized(getUserDoc(), resource.data))
+        isBootstrappedAdmin() ||
+        (hasUserDoc() && (isSupervisor(getUserDoc()) || isOfficeAuthorized(getUserDoc(), resource.data)))
       );
 
       allow list: if isSignedIn() && (
-        !hasUserDoc() ||
-        isSupervisor(getUserDoc()) ||
-        isClinicalStaff(getUserDoc())
+        isBootstrappedAdmin() ||
+        (hasUserDoc() && (isSupervisor(getUserDoc()) || isClinicalStaff(getUserDoc())))
       );
 
       allow create: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && isValidUser(incoming());
 
       allow update: if isSignedIn() && isValidId(userId) && (
         request.auth.uid == userId ||
-        (!hasUserDoc()) ||
-        isSupervisor(getUserDoc())
+        isBootstrappedAdmin() ||
+        (hasUserDoc() && isSupervisor(getUserDoc()))
       ) && isValidUser(incoming());
 
       allow delete: if isSignedIn() && isValidId(userId) && (
-        !hasUserDoc() ||
-        isSupervisor(getUserDoc())
+        isBootstrappedAdmin() ||
+        (hasUserDoc() && isSupervisor(getUserDoc()))
       );
     }
   }

@@ -1,10 +1,15 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { 
+  getAuth, 
+  initializeAuth, 
+  inMemoryPersistence 
+} from 'firebase/auth';
 import { 
   initializeFirestore, 
   getFirestore, 
-  persistentLocalCache, 
-  persistentMultipleTabManager 
+  memoryLocalCache,
+  doc,
+  getDocFromServer
 } from 'firebase/firestore';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider, type AppCheck } from 'firebase/app-check';
 import firebaseConfig from '../firebase-applet-config.json';
@@ -69,20 +74,32 @@ if (typeof window !== 'undefined' && siteKey && siteKey.trim() !== '') {
 
 const firestoreDbId = (firebaseConfig as any).firestoreDatabaseId;
 
+// Always use memoryLocalCache to guarantee 100% immunity against "SecurityError: The operation is insecure"
+// while keeping full live bidirectional synchronization with the cloud Firestore database.
 export const db = (() => {
   try {
     return initializeFirestore(app, {
-      experimentalAutoDetectLongPolling: true,
-      localCache: persistentLocalCache({
-        tabManager: persistentMultipleTabManager()
-      })
+      localCache: memoryLocalCache()
     }, firestoreDbId || undefined);
   } catch {
-    return firestoreDbId ? getFirestore(app, firestoreDbId) : getFirestore(app);
+    try {
+      return firestoreDbId ? getFirestore(app, firestoreDbId) : getFirestore(app);
+    } catch (e) {
+      console.warn("Firestore initialization fallback:", e);
+      return getFirestore(app);
+    }
   }
 })(); /* CRITICAL: The app will break without proper firestore initialization */
 
-export const auth = getAuth(app);
+export const auth = (() => {
+  try {
+    return initializeAuth(app, {
+      persistence: inMemoryPersistence
+    });
+  } catch {
+    return getAuth(app);
+  }
+})();
 
 export enum OperationType {
   CREATE = 'create',

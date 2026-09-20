@@ -9,6 +9,7 @@
 
 import { Patient, Appointment } from "../types";
 import { interceptDecryptionAnomaly } from "./firestoreInterceptor";
+import { safeStorage } from "./safeStorage";
 
 const EPHI_KEY_STORAGE = "perio_ephi_master_passphrase";
 const DEFAULT_CLINIC_SALT = new TextEncoder().encode("PerioDash_Clinical_ePHI_Salt_v15");
@@ -22,7 +23,7 @@ export function getClinicMasterPassphrase(): string {
   if (typeof window === "undefined") {
     return "PerioDash-Default-Secure-Clinic-Vault-Key-2026";
   }
-  const custom = localStorage.getItem(EPHI_KEY_STORAGE);
+  const custom = safeStorage.getItem(EPHI_KEY_STORAGE);
   if (custom && custom.trim().length >= 8) {
     return custom.trim();
   }
@@ -38,7 +39,7 @@ export function setClinicMasterPassphrase(passphrase: string): void {
   if (!passphrase || passphrase.trim().length < 8) {
     throw new Error("La clave maestra de cifrado debe tener al menos 8 caracteres.");
   }
-  localStorage.setItem(EPHI_KEY_STORAGE, passphrase.trim());
+  safeStorage.setItem(EPHI_KEY_STORAGE, passphrase.trim());
 }
 
 /**
@@ -46,7 +47,7 @@ export function setClinicMasterPassphrase(passphrase: string): void {
  */
 export function resetClinicMasterPassphrase(): void {
   if (typeof window === "undefined") return;
-  localStorage.removeItem(EPHI_KEY_STORAGE);
+  safeStorage.removeItem(EPHI_KEY_STORAGE);
 }
 
 // In-memory cache for derived CryptoKey to maximize UI performance

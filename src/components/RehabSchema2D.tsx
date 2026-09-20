@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Patient } from "../types";
 import { motion, AnimatePresence } from "motion/react";
+import { copyToClipboardSafely } from "../utils/safeClipboard";
 import {
   Ruler,
   Layers,
@@ -183,7 +184,7 @@ export default function RehabSchema2D({ patient, onUpdatePatient }: RehabSchema2
   const dvoIncrease = schemaState.dvoTarget - schemaState.dvoCurrent;
 
   // Copy clinical summary report
-  const handleCopyReport = () => {
+  const handleCopyReport = async () => {
     const lines = [
       `==================================================`,
       `PERIODASH - ESQUEMA BIOMECÁNICO Y OCLUSAL 2D`,
@@ -228,7 +229,7 @@ export default function RehabSchema2D({ patient, onUpdatePatient }: RehabSchema2
       `==================================================`
     ];
 
-    navigator.clipboard.writeText(lines.join("\n"));
+    await copyToClipboardSafely(lines.join("\n"));
     setCopiedReport(true);
     setTimeout(() => setCopiedReport(false), 2500);
   };

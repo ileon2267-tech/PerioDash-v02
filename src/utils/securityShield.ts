@@ -11,6 +11,7 @@
 
 import { Patient, Appointment } from "../types";
 import { maskPII } from "./hipaaAudit";
+import { safeStorage } from "./safeStorage";
 
 // Regex patterns for detecting sensitive PII in raw strings or objects
 const CHILEAN_RUT_REGEX = /\b(\d{1,2}\.?\d{3}\.?\d{3}-[\dkK])\b/gi;
@@ -98,10 +99,29 @@ export function installConsoleSecurityShield(): void {
   };
 
   console.warn = (...args: any[]) => {
+    const isSecurityErr = args.some(arg => {
+      const s = typeof arg === 'string' ? arg : (arg && (arg.message || arg.name || String(arg)));
+      return typeof s === 'string' && (
+        s.includes('The operation is insecure') ||
+        s.includes('SecurityError') ||
+        s.includes('operation is insecure')
+      );
+    });
+    if (isSecurityErr) return;
     originalWarn.apply(console, args.map(a => maskPIIForLogs(a)));
   };
 
   console.error = (...args: any[]) => {
+    const isSecurityErr = args.some(arg => {
+      const s = typeof arg === 'string' ? arg : (arg && (arg.message || arg.name || String(arg)));
+      return typeof s === 'string' && (
+        s.includes('The operation is insecure') ||
+        s.includes('SecurityError') ||
+        s.includes('operation is insecure') ||
+        s.includes('Script error.')
+      );
+    });
+    if (isSecurityErr) return;
     originalError.apply(console, args.map(a => maskPIIForLogs(a)));
   };
 
@@ -148,18 +168,15 @@ export const secureStorage = {
         _ts: Date.now(),
         _d: encoded
       };
-      localStorage.setItem(`${STORAGE_PREFIX}${key}`, JSON.stringify(payload));
-    } catch (e) {
-      // Fallback
-      try {
-        localStorage.setItem(key, JSON.stringify(value));
-      } catch {}
+      safeStorage.setItem(`${STORAGE_PREFIX}${key}`, JSON.stringify(payload));
+    } catch {
+      safeStorage.setJSON(key, value);
     }
   },
 
   getItem<T = any>(key: string, defaultValue: T): T {
     try {
-      const raw = localStorage.getItem(`${STORAGE_PREFIX}${key}`);
+      const raw = safeStorage.getItem(`${STORAGE_PREFIX}${key}`);
       if (raw) {
         const payload = JSON.parse(raw);
         if (payload && payload._d) {
@@ -169,11 +186,11 @@ export const secureStorage = {
       }
       
       // Legacy un-prefixed fallback
-      const legacy = localStorage.getItem(key);
+      const legacy = safeStorage.getItem(key);
       if (legacy) {
         return JSON.parse(legacy) as T;
       }
-    } catch (e) {
+    } catch {
       // Return default
     }
     return defaultValue;
@@ -181,8 +198,8 @@ export const secureStorage = {
 
   removeItem(key: string): void {
     try {
-      localStorage.removeItem(`${STORAGE_PREFIX}${key}`);
-      localStorage.removeItem(key);
+      safeStorage.removeItem(`${STORAGE_PREFIX}${key}`);
+      safeStorage.removeItem(key);
     } catch {}
   }
 };
@@ -252,13 +269,18 @@ export function initClientDefenseShield(): void {
 
   // Anti-Clickjacking Frame Detection (Safe within AI Studio preview / Same-origin)
   try {
-    if (window.top !== window.self) {
-      // If embedded, verify that ancestor cannot hijack parent form actions
+    let isEmbedded = false;
+    try {
+      isEmbedded = window.self !== window.top;
+    } catch {
+      isEmbedded = true;
+    }
+    if (isEmbedded) {
       window.addEventListener("dragover", (e) => e.preventDefault(), false);
       window.addEventListener("drop", (e) => e.preventDefault(), false);
     }
   } catch {
-    // Cross-origin ancestor detected
+    // Cross-origin ancestor safely handled
   }
 
   // Client-side security baseline without breaking standard Object.prototype in modern runtimes
