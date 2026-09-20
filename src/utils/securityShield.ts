@@ -52,8 +52,10 @@ export function maskPIIForLogs<T = any>(val: T, depth = 0): T {
     const scrubbedObj: Record<string, any> = {};
     const sensitiveKeys = [
       "rut", "dni", "phone", "telefono", "email", "correo", "password", 
-      "token", "apiKey", "apikey", "anamnesis", "medicalhistory", 
-      "periodontogram", "odontogram", "secret", "direccion", "address"
+      "token", "apikey", "anamnesis", "medicalhistory", "diagnostic", "diagnostico",
+      "periodontogram", "odontogram", "secret", "direccion", "address",
+      "sondaje", "recesion", "furca", "movilidad", "bop", "placa", "teeth",
+      "patientname", "nombre", "apellido", "birthdate", "fechanacimiento"
     ];
 
     for (const [key, value] of Object.entries(val)) {

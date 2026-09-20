@@ -33,19 +33,26 @@ service cloud.firestore {
     function isBootstrappedAdmin() {
       return isSignedIn() && (
         (request.auth.token.email != null && request.auth.token.email in ['i.lenfernndez@gmail.com', 'admin@periodash.com', 'doctor@periodash.com']) ||
-        (request.auth.token.email != null && request.auth.token.email.matches('.*@periodash\\.com$'))
+        (request.auth.token.email != null && request.auth.token.email.matches('.*@periodash\\.com$')) ||
+        (request.auth.token.role != null && request.auth.token.role in ['admin', 'superadmin'])
       );
     }
 
-    // Role Checks
+    // Role Checks (Priority: Cryptographic Custom Claims in request.auth.token, fallback to verified uData)
     function isSupervisor(uData) {
       return isBootstrappedAdmin() ||
+             (request.auth.token.role != null && request.auth.token.role in ['superadmin', 'supervisor']) ||
+             (request.auth.token.isSupervisor == true) ||
              uData.role in ['superadmin', 'supervisor'] || 
              (('isSupervisor' in uData) && uData.isSupervisor == true);
     }
 
     function isClinicalStaff(uData) {
       return isBootstrappedAdmin() ||
+             (request.auth.token.role != null && request.auth.token.role in [
+               'odontologo', 'periodoncista', 'implantologo', 'higienista', 
+               'asistente', 'doctor', 'clinico', 'especialista', 'supervisor', 'superadmin'
+             ]) ||
              uData.role in [
                'odontologo', 'periodoncista', 'implantologo', 'higienista', 
                'asistente', 'doctor', 'clinico', 'especialista'
@@ -54,7 +61,9 @@ service cloud.firestore {
 
     // Pure Admin without active supervisor status (restricted from clinical ePHI)
     function isRestrictedAdmin(uData) {
-      return !isBootstrappedAdmin() && uData.role in ['admin', 'administrador', 'recepcionista'] && !isSupervisor(uData);
+      return !isBootstrappedAdmin() && 
+             (request.auth.token.role in ['admin', 'administrador', 'recepcionista'] || uData.role in ['admin', 'administrador', 'recepcionista']) && 
+             !isSupervisor(uData);
     }
 
     // Clinical Office / Branch Partitioning Check
@@ -248,7 +257,7 @@ service cloud.firestore {
     }
 
     // =========================================================================
-    // USER PROFILES & ROLES (RBAC Management)
+    // USER PROFILES & ROLES (RBAC Management & Anti-Privilege Escalation)
     // =========================================================================
     match /users/{userId} {
       allow get: if isSignedIn() && isValidId(userId) && (
@@ -262,14 +271,28 @@ service cloud.firestore {
         (hasUserDoc() && (isSupervisor(getUserDoc()) || isClinicalStaff(getUserDoc())))
       );
 
-      allow create: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && isValidUser(incoming());
-
-      allow update: if isSignedIn() && isValidId(userId) && (
-        request.auth.uid == userId ||
+      // Self-creation: Non-privileged users cannot self-assign elevated roles or flags
+      allow create: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && isValidUser(incoming()) && (
         isBootstrappedAdmin() ||
-        (hasUserDoc() && isSupervisor(getUserDoc()))
-      ) && isValidUser(incoming());
+        (
+          incoming().role in ['odontologo', 'cliente'] &&
+          (!('isSupervisor' in incoming()) || incoming().isSupervisor == false)
+        )
+      );
 
+      // Self-update: Cannot elevate role or supervisor status. Only Admin/Supervisor can modify roles
+      allow update: if isSignedIn() && isValidId(userId) && isValidUser(incoming()) && (
+        isBootstrappedAdmin() ||
+        (hasUserDoc() && isSupervisor(getUserDoc())) ||
+        (
+          request.auth.uid == userId &&
+          incoming().role == resource.data.role &&
+          (!('isSupervisor' in incoming()) || incoming().isSupervisor == (('isSupervisor' in resource.data) ? resource.data.isSupervisor : false)) &&
+          (!('clinicId' in incoming()) || incoming().clinicId == (('clinicId' in resource.data) ? resource.data.clinicId : ''))
+        )
+      );
+
+      // Deletion strictly limited to Admin / Supervisor
       allow delete: if isSignedIn() && isValidId(userId) && (
         isBootstrappedAdmin() ||
         (hasUserDoc() && isSupervisor(getUserDoc()))

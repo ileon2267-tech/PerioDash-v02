@@ -9,7 +9,7 @@ import {
 import { formatRut } from "./utils/rutUtils";
 import { deduplicatePatients, deduplicateAppointments, generateUniqueId } from "./utils/dataUtils";
 import { db, handleFirestoreError, OperationType, auth, cleanForFirestore } from "./firebase";
-import { signInAnonymously } from "firebase/auth";
+import { signInAnonymously, signOut } from "firebase/auth";
 import { collection, doc, setDoc, getDocs, deleteDoc, getDocFromServer, onSnapshot } from "firebase/firestore";
 import { recordHipaaAudit, maskPII } from "./utils/hipaaAudit";
 import { interceptFirestoreRead } from "./utils/firestoreInterceptor";
@@ -338,6 +338,7 @@ export default function App() {
         severity: "info"
       });
     }
+    signOut(auth).catch(() => {});
     safeStorage.setItem("perioLoggedIn", "false");
     safeStorage.removeItem("perioActiveUser");
     setActiveUser(null);

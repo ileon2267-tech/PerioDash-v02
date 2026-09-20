@@ -59,17 +59,35 @@ export default function TwoFactorAuthStep({
     return `${maskedName}@${domain}`;
   };
 
-  // Generate dynamic one-time passcode for fallback
-  const generateNewPasscode = (showNotice = false) => {
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setCurrentOtp(code);
-    setTimeLeft(60);
+  // Generate dynamic one-time passcode via server-side CSPRNG
+  const generateNewPasscode = async (showNotice = false) => {
+    setIsVerifying(true);
     setOtpError(null);
     setDigits(["", "", "", "", "", ""]);
-    
-    if (showNotice) {
-      setLinkSuccessNotice("Se ha generado un nuevo código de respaldo local para su sesión.");
-      setTimeout(() => setLinkSuccessNotice(null), 4000);
+
+    try {
+      const res = await fetch("/api/auth/2fa/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: user.email }),
+      });
+
+      const data = await res.json();
+      setIsVerifying(false);
+
+      if (res.ok && data.code) {
+        setCurrentOtp(data.code);
+        setTimeLeft(data.expiresInSeconds || 120);
+        if (showNotice) {
+          setLinkSuccessNotice("Se ha generado un nuevo desafío criptográfico 2FA verificado por el servidor.");
+          setTimeout(() => setLinkSuccessNotice(null), 4000);
+        }
+      } else {
+        setOtpError(data.error || "No se pudo generar el desafío de seguridad en el servidor.");
+      }
+    } catch (err) {
+      setIsVerifying(false);
+      setOtpError("Error de comunicación con el servicio de autenticación segura.");
     }
   };
 
@@ -162,7 +180,7 @@ export default function TwoFactorAuthStep({
     }
   };
 
-  const performVerification = (codeToTest: string) => {
+  const performVerification = async (codeToTest: string) => {
     setIsVerifying(true);
     setOtpError(null);
 
@@ -172,18 +190,33 @@ export default function TwoFactorAuthStep({
       return;
     }
 
-    if (codeToTest === currentOtp) {
+    try {
+      const res = await fetch("/api/auth/2fa/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: user.email,
+          code: codeToTest,
+          trustDevice,
+        }),
+      });
+
+      const data = await res.json();
       setIsVerifying(false);
-      if (trustDevice) {
-        const shiftDurationMs = 8 * 60 * 60 * 1000;
-        safeStorage.setItem(`2fa_trusted_${user.email}`, String(Date.now() + shiftDurationMs));
+
+      if (res.ok && data.success) {
+        // Store cryptographic proof token signed by server
+        safeStorage.setItem(`2fa_proof_${user.email}`, data.proofToken);
+        safeStorage.setItem(`2fa_trusted_${user.email}`, String(data.expiresAt));
+        onVerifySuccess();
+      } else {
+        setOtpError(data.error || "Código de seguridad incorrecto. Intente nuevamente.");
+        setDigits(["", "", "", "", "", ""]);
+        inputRefs.current[0]?.focus();
       }
-      onVerifySuccess();
-    } else {
+    } catch (err) {
       setIsVerifying(false);
-      setOtpError("Código de seguridad incorrecto. Intente nuevamente.");
-      setDigits(["", "", "", "", "", ""]);
-      inputRefs.current[0]?.focus();
+      setOtpError("Error al contactar al validador seguro de 2FA.");
     }
   };
 

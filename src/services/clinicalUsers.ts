@@ -1,76 +1,38 @@
 import { ClinicalUser } from "../types";
 import { safeStorage } from "../utils/safeStorage";
 
-export const DEFAULT_CLINICAL_USERS: ClinicalUser[] = [
-  {
-    id: "usr-doctor-demo",
-    name: "Dr. Alejandro Soto",
-    email: "doctor@periodash.com",
-    password: "perio",
-    profile: "particular",
-    role: "odontologo",
-    specialty: "Periodoncia e Implantología",
-    permissions: ['read_patients', 'write_patients', 'view_ephi', 'edit_ephi'],
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: "usr-admin-demo",
-    name: "Director Clínico (Admin)",
-    email: "admin@periodash.com",
-    password: "admin",
-    profile: "clinica",
-    role: "admin",
-    clinicId: "oficina_central",
-    permissions: ['read_patients', 'write_patients', 'view_ephi', 'edit_ephi', 'audit_supervision', 'manage_users'],
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: "usr-elena-demo",
-    name: "Dra. Elena Torres",
-    email: "dra.elena@periodash.com",
-    password: "elena",
-    profile: "clinica",
-    role: "supervisor",
-    clinicId: "oficina_central",
-    isSupervisor: true,
-    specialty: "Rehabilitación Oral",
-    permissions: ['read_patients', 'write_patients', 'view_ephi', 'edit_ephi', 'audit_supervision'],
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: "usr-recep-demo",
-    name: "Recepción Clínica",
-    email: "recepcion@periodash.com",
-    password: "recep",
-    profile: "clinica",
-    role: "asistente",
-    permissions: ['read_patients', 'write_patients'],
-    createdAt: new Date().toISOString()
-  }
-];
+/**
+ * PerioDash Security Hardening - FASE 1: Paso 1.1
+ * ELIMINACIÓN TOTAL DE CREDENCIALES HARDCODEADAS Y LOGIN LOCAL.
+ * 
+ * Ningún usuario clínico ni credencial mock/demo reside en el código fuente.
+ * La única fuente de identidad y autenticación es Firebase Auth.
+ */
+export const DEFAULT_CLINICAL_USERS: ClinicalUser[] = [];
 
+/**
+ * Obtiene el perfil del usuario autenticado en Firebase desde la sesión protegida.
+ */
 export function getStoredClinicalUsers(): ClinicalUser[] {
   const saved = safeStorage.getItem("perioUsuarios");
   if (saved) {
     try {
       const parsed = JSON.parse(saved) as ClinicalUser[];
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const existingEmails = new Set(parsed.map(u => u.email.toLowerCase()));
-        const merged = [...parsed];
-        for (const defU of DEFAULT_CLINICAL_USERS) {
-          if (!existingEmails.has(defU.email.toLowerCase())) {
-            merged.push(defU);
-          }
-        }
-        return merged;
+      if (Array.isArray(parsed)) {
+        // Filtrar cualquier rezago de usuarios demo hardcodeados previos
+        return parsed.filter(u => !u.id.includes("-demo") && !u.email.endsWith("@periodash.com"));
       }
-    } catch (e) {
-      // fallback
+    } catch {
+      // fallback a lista vacía
     }
   }
-  return DEFAULT_CLINICAL_USERS;
+  return [];
 }
 
+/**
+ * Resuelve o construye el perfil de usuario clínico vinculado directamente
+ * al UID y Claims de Firebase Auth autenticado.
+ */
 export function findOrRegisterClinicalUserByEmail(email: string, uid?: string): ClinicalUser {
   const users = getStoredClinicalUsers();
   const cleanEmail = email.trim().toLowerCase();
@@ -78,7 +40,7 @@ export function findOrRegisterClinicalUserByEmail(email: string, uid?: string): 
   
   if (!found) {
     found = {
-      id: uid || `usr-${Date.now()}`,
+      id: uid || `auth-${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`,
       name: cleanEmail.split('@')[0],
       email: cleanEmail,
       profile: "particular",

@@ -31,8 +31,7 @@ import { createEmptyOdontogram, createEmptyPeriodontogram } from "../initialData
 import CaptchaComponent from "./CaptchaComponent";
 import TwoFactorAuthStep from "./TwoFactorAuthStep";
 import { sendClinicalEmailLink } from "../services/emailLinkAuth";
-import { DEFAULT_CLINICAL_USERS, getStoredClinicalUsers, findOrRegisterClinicalUserByEmail } from "../services/clinicalUsers";
-export { DEFAULT_CLINICAL_USERS };
+import { getStoredClinicalUsers, findOrRegisterClinicalUserByEmail } from "../services/clinicalUsers";
 import { 
   signInWithPopup, 
   GoogleAuthProvider, 
@@ -77,7 +76,6 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
   const [regProfile, setRegProfile] = useState<'particular' | 'clinica' | 'universidad' | 'cliente'>("particular");
   const [regSpecialty, setRegSpecialty] = useState("");
   const [regClinicId, setRegClinicId] = useState("oficina_central");
-  const [regIsSupervisor, setRegIsSupervisor] = useState(false);
   const [regError, setRegError] = useState<string | null>(null);
   const [regSuccessMessage, setRegSuccessMessage] = useState<string | null>(null);
 
@@ -105,7 +103,7 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
     }, 80);
   };
 
-  // Perform Clinical Authentication
+  // Perform Clinical Authentication (Firebase Auth as the Single Source of Truth)
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
@@ -125,71 +123,64 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
     setIsLoading(true);
 
     try {
-      // 1. Check local registered accounts first (strict credential match)
-      const existingAccount = users.find(u => u.email.toLowerCase() === emailTrim);
+      // Direct Firebase Auth credential validation - no local plaintext fallback
+      const userCred = await signInWithEmailAndPassword(auth, emailTrim, passwordTrim);
+      const authUser = userCred.user;
+      
+      // Obtain verified cryptographic Custom Claims from Firebase Auth token
+      const idTokenResult = await authUser.getIdTokenResult();
+      const claims = idTokenResult.claims || {};
+      const tokenRole = (claims.role as any) || undefined;
+      const tokenIsSupervisor = claims.isSupervisor !== undefined ? Boolean(claims.isSupervisor) : undefined;
+      
+      // Resolve clinical profile linked to validated Firebase UID and server-stamped claims
+      const storedAccount = users.find(u => u.email.toLowerCase() === emailTrim);
+      const resolvedRole = tokenRole || storedAccount?.role || 'odontologo';
+      const resolvedIsSupervisor = tokenIsSupervisor !== undefined ? tokenIsSupervisor : Boolean(storedAccount?.isSupervisor);
 
-      if (existingAccount) {
-        if (!existingAccount.password) {
-          setIsLoading(false);
-          setLoginError("Esta cuenta está vinculada a un proveedor externo (Google/Apple). Por favor utilice el botón correspondiente.");
-          return;
-        }
+      const resolvedUser: ClinicalUser = {
+        id: authUser.uid,
+        name: authUser.displayName || storedAccount?.name || emailTrim.split('@')[0],
+        email: emailTrim,
+        profile: (claims.profile as any) || storedAccount?.profile || 'particular',
+        role: resolvedRole,
+        clinicId: (claims.clinicId as string) || storedAccount?.clinicId,
+        isSupervisor: resolvedIsSupervisor,
+        permissions: (resolvedRole === 'admin' || resolvedRole === 'superadmin' || resolvedIsSupervisor)
+          ? ['read_patients', 'write_patients', 'delete_patients', 'view_ephi', 'edit_ephi', 'audit_supervision', 'manage_users']
+          : ['read_patients', 'write_patients', 'view_ephi', 'edit_ephi'],
+        specialty: (claims.specialty as string) || storedAccount?.specialty || "Periodoncia e Implantología",
+        createdAt: storedAccount?.createdAt || new Date().toISOString()
+      };
 
-        if (existingAccount.password !== passwordTrim) {
-          setIsLoading(false);
-          setLoginError("Contraseña incorrecta. Verifique sus credenciales.");
-          return;
-        }
+      saveUsers([...users.filter(u => u.email.toLowerCase() !== emailTrim), resolvedUser]);
 
-        // Credentials match
-        setIsLoading(false);
-        // Non-blocking Firebase Auth sync in background if supported
-        signInWithEmailAndPassword(auth, emailTrim, passwordTrim).catch(() => {});
-        
-        // Fast-path if device was already trusted within active shift
-        const trustedVal = safeStorage.getItem(`2fa_trusted_${existingAccount.email}`);
-        const trustedExpiry = parseInt(trustedVal || "0", 10);
-        const isTrusted = !isNaN(trustedExpiry) && trustedExpiry > Date.now();
-        if (isTrusted) {
-          setLoggedInUser(existingAccount);
-          setAuthSuccess(true);
-          setTimeout(() => onLogin(existingAccount), 80);
-        } else {
-          proceedTo2FAStep(existingAccount);
-        }
-        return;
-      }
-
-      // 2. If not matched in local cache, attempt secure Firebase Auth
-      try {
-        const userCred = await signInWithEmailAndPassword(auth, emailTrim, passwordTrim);
-        const authUser = userCred.user;
-        
-        const resolvedUser: ClinicalUser = {
-          id: authUser.uid,
-          name: authUser.displayName || emailTrim.split('@')[0],
-          email: emailTrim,
-          password: passwordTrim,
-          profile: 'particular',
-          role: 'odontologo',
-          createdAt: new Date().toISOString()
-        };
-        saveUsers([...users, resolvedUser]);
-
-        setIsLoading(false);
+      // Fast-path ONLY if device was legitimately verified with a valid cryptographic proof token
+      const trustedVal = safeStorage.getItem(`2fa_trusted_${resolvedUser.email}`);
+      const proofToken = safeStorage.getItem(`2fa_proof_${resolvedUser.email}`);
+      const trustedExpiry = parseInt(trustedVal || "0", 10);
+      const isTrusted = Boolean(proofToken) && !isNaN(trustedExpiry) && trustedExpiry > Date.now();
+      if (isTrusted) {
+        setLoggedInUser(resolvedUser);
+        setAuthSuccess(true);
+        setTimeout(() => onLogin(resolvedUser), 80);
+      } else {
         proceedTo2FAStep(resolvedUser);
-      } catch (authErr: any) {
-        setIsLoading(false);
-        setLoginError("Credenciales clínicas no reconocidas. Verifique sus datos o regístrese.");
-        return;
       }
-    } catch (err: any) {
+    } catch (authErr: any) {
       setIsLoading(false);
-      setLoginError("Error al verificar credenciales clínicas.");
+      const errorCode = authErr?.code;
+      if (errorCode === "auth/invalid-credential" || errorCode === "auth/wrong-password" || errorCode === "auth/user-not-found") {
+        setLoginError("Credenciales incorrectas o usuario no registrado en Firebase Auth.");
+      } else if (errorCode === "auth/too-many-requests") {
+        setLoginError("Demasiados intentos fallidos. Por favor intente más tarde.");
+      } else {
+        setLoginError(`Fallo de autenticación: ${authErr?.message || "Verifique sus credenciales"}`);
+      }
     }
   };
 
-  // Registration Submitter
+  // Registration Submitter via Firebase Auth
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setRegError(null);
@@ -216,43 +207,53 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
       return;
     }
 
-    const emailExists = users.some(u => u.email.toLowerCase() === emailTrim);
-    if (emailExists) {
-      setRegError("Este correo electrónico ya se encuentra registrado.");
-      return;
-    }
-
     setIsLoading(true);
 
     try {
-      const authUid = `usr-${Date.now()}`;
-      // Non-blocking Firebase Auth creation attempt in background (does not freeze UI)
-      createUserWithEmailAndPassword(auth, emailTrim, regPassword).catch(() => {});
+      // 1. Create user directly in Firebase Auth
+      const userCred = await createUserWithEmailAndPassword(auth, emailTrim, regPassword);
+      const authUid = userCred.user.uid;
+      const idToken = await userCred.user.getIdToken();
 
-      let resolvedRole: any = "odontologo";
-      if (regProfile === "clinica") {
-        resolvedRole = regIsSupervisor ? "supervisor" : "admin";
-      } else if (regProfile === "cliente") {
-        resolvedRole = "cliente";
+      // 2. Call backend to securely assign baseline Custom Claims (no client self-elevation)
+      let backendClaims: any = { role: regProfile === "cliente" ? "cliente" : "odontologo", isSupervisor: false };
+      try {
+        const claimRes = await fetch("/api/auth/register-profile", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            name: nameTrim,
+            profile: regProfile,
+            specialty: regSpecialty.trim() || undefined,
+          }),
+        });
+        if (claimRes.ok) {
+          const claimData = await claimRes.json();
+          if (claimData?.claims) {
+            backendClaims = claimData.claims;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not register claims via backend API:", err);
       }
 
       const newUser: ClinicalUser = {
         id: authUid,
         name: nameTrim,
         email: emailTrim,
-        password: regPassword,
         profile: regProfile,
-        role: resolvedRole,
+        role: backendClaims.role || (regProfile === "cliente" ? "cliente" : "odontologo"),
         clinicId: regProfile === "cliente" ? undefined : regClinicId,
-        isSupervisor: regIsSupervisor,
-        permissions: regIsSupervisor 
-          ? ['read_patients', 'write_patients', 'view_ephi', 'edit_ephi', 'audit_supervision', 'manage_users'] 
-          : ['read_patients', 'write_patients', 'view_ephi'],
+        isSupervisor: Boolean(backendClaims.isSupervisor),
+        permissions: ['read_patients', 'write_patients', 'view_ephi', 'edit_ephi'],
         specialty: regSpecialty.trim() || undefined,
         createdAt: new Date().toISOString()
       };
 
-      const updatedUsersList = [...users, newUser];
+      const updatedUsersList = [...users.filter(u => u.email.toLowerCase() !== emailTrim), newUser];
       saveUsers(updatedUsersList);
       setUsers(updatedUsersList);
 
@@ -355,12 +356,22 @@ export default function LoginScreen({ onLogin, defaultEmail = "", darkMode, setD
         return;
       }
 
-      const targetUser = users.find(u => u.email.toLowerCase() === emailTrim);
-      if (!targetUser) {
+      // Biometric login requires an active authenticated Firebase user session
+      const currentAuthUser = auth.currentUser;
+      if (!currentAuthUser || currentAuthUser.isAnonymous || currentAuthUser.email?.toLowerCase() !== emailTrim) {
         setIsLoading(false);
-        setLoginError("No se encontró usuario clínico con ese correo.");
+        setLoginError("Para habilitar la autenticación biométrica, primero debe iniciar sesión con sus credenciales de Firebase Auth.");
         return;
       }
+
+      const targetUser = users.find(u => u.email.toLowerCase() === emailTrim) || {
+        id: currentAuthUser.uid,
+        name: currentAuthUser.displayName || emailTrim.split('@')[0],
+        email: emailTrim,
+        profile: 'particular',
+        role: 'odontologo',
+        createdAt: new Date().toISOString()
+      };
 
       if (typeof window !== "undefined" && window.PublicKeyCredential) {
         // Platform biometric authenticator available
